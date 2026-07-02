@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import AuthScreen from "./AuthScreen.jsx";
 
 /* ============================================================
    BLORBIFY — Landing Page
@@ -178,6 +179,8 @@ export default function App() {
   const [scrolled, setScrolled] = useState(false);
   const [openFaq, setOpenFaq] = useState(0);
   const [heroLoaded, setHeroLoaded] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState("signup");
 
   useEffect(() => {
     const t = setTimeout(() => setHeroLoaded(true), 150);
@@ -194,6 +197,16 @@ export default function App() {
     setNavOpen(false);
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const openAuth = useCallback((mode = "signup") => {
+    setAuthMode(mode);
+    setShowAuth(true);
+    setNavOpen(false);
+  }, []);
+
+  const closeAuth = useCallback(() => {
+    setShowAuth(false);
   }, []);
 
   const painPoints = [
@@ -282,6 +295,19 @@ export default function App() {
     { q: "How fast can I actually go live?", a: "Most businesses are live the same day they sign up." },
     { q: "Can I cancel if it\u2019s not for me?", a: "Yes \u2014 every plan is month-to-month. No lock-in." },
   ];
+
+  if (showAuth) {
+    return (
+      <AuthScreen
+        initialMode={authMode}
+        onClose={closeAuth}
+        onSuccess={() => {
+          setShowAuth(false);
+          setNavOpen(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="bl-root">
@@ -655,7 +681,7 @@ export default function App() {
             <a href="#how" onClick={scrollTo("how")}>How it works</a>
             <a href="#pricing" onClick={scrollTo("pricing")}>Pricing</a>
             <a href="#faq" onClick={scrollTo("faq")}>FAQ</a>
-            <button className="nav-cta" onClick={scrollTo("cta")}>Get my free store</button>
+            <button className="nav-cta" onClick={() => openAuth("signup")}>Get my free store</button>
           </div>
           <button className="nav-burger" onClick={() => setNavOpen((v) => !v)} aria-label="Menu">
             {navOpen ? <IconClose /> : <IconMenu />}
@@ -679,7 +705,7 @@ export default function App() {
             <h1>Your business deserves<br />to be <em>found</em> online.</h1>
             <p className="hero-sub">Launch a professional website and store in minutes — no developer, no design skills, no wahala.</p>
             <div className="hero-cta-row">
-              <button className="btn-primary" onClick={scrollTo("cta")}>
+              <button className="btn-primary" onClick={() => openAuth("signup")}>
                 Get my free store in 5 minutes <IconArrow size={18} />
               </button>
               <span className="hero-micro">No credit card needed &middot; Cancel anytime</span>
@@ -899,7 +925,7 @@ export default function App() {
                       <div className="plan-feat" key={f}><IconCheck size={16} />{f}</div>
                     ))}
                   </div>
-                  <button className="plan-cta" onClick={scrollTo("cta")}>Choose {p.name}</button>
+                  <button className="plan-cta" onClick={() => openAuth("signup")}>Choose {p.name}</button>
                 </div>
               </Reveal>
             ))}
@@ -933,7 +959,7 @@ export default function App() {
       <section className="final-cta" id="cta">
         <div className="wrap final-inner">
           <h2>Your customers are already searching. Let them find you.</h2>
-          <button className="btn-dark">Start my store now — it's free to try <IconArrow size={18} /></button>
+          <button className="btn-dark" onClick={() => openAuth("signup")}>Start my store now — it's free to try <IconArrow size={18} /></button>
         </div>
       </section>
 
