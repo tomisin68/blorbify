@@ -153,6 +153,26 @@ function DetailRow({ label, value }) {
   );
 }
 
+const businessTypeOptions = [
+  { value: 'fashion', label: 'Fashion & Clothing' },
+  { value: 'beauty', label: 'Beauty & Cosmetics' },
+  { value: 'food', label: 'Food & Beverages' },
+  { value: 'electronics', label: 'Electronics & Gadgets' },
+  { value: 'services', label: 'Services' },
+  { value: 'handmade', label: 'Handmade & Crafts' },
+  { value: 'health', label: 'Health & Wellness' },
+  { value: 'others', label: 'Others' },
+];
+
+const nigerianStates = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue',
+  'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu',
+  'FCT Abuja', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano', 'Katsina',
+  'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun',
+  'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
+  'Yobe', 'Zamfara',
+];
+
 function OrderRow({ order }) {
   return (
     <div className="order-row">
@@ -501,6 +521,189 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function BusinessInfoEditor({ userId, profile, storeInfo, onBusinessSaved }) {
+  const getCurrentForm = () => ({
+    businessName: storeInfo.businessName || profile?.businessName || '',
+    businessType: storeInfo.businessType || profile?.businessType || '',
+    description: storeInfo.description || profile?.description || '',
+    phone: storeInfo.phone || profile?.phone || '',
+    city: storeInfo.city || profile?.city || '',
+    state: storeInfo.state || profile?.state || '',
+    instagram: storeInfo.instagram || profile?.instagram || '',
+  });
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(getCurrentForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const updateField = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setError('');
+    setSuccess('');
+  };
+
+  const resetForm = () => {
+    setForm(getCurrentForm());
+    setEditing(false);
+    setError('');
+    setSuccess('');
+  };
+
+  const startEditing = () => {
+    setForm(getCurrentForm());
+    setEditing(true);
+    setError('');
+    setSuccess('');
+  };
+
+  const validate = () => {
+    if (!form.businessName.trim()) return 'Business name is required.';
+    if (!form.businessType) return 'Select your business type.';
+    if (!/^[0-9]{10,11}$/.test(form.phone.replace(/\D/g, ''))) return 'Enter a valid phone number.';
+    if (!form.city.trim()) return 'City is required.';
+    if (!form.state) return 'Select your state.';
+    return '';
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError('');
+    setSuccess('');
+
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const businessUpdate = {
+      businessName: form.businessName.trim(),
+      businessType: form.businessType,
+      description: form.description.trim(),
+      phone: form.phone.trim(),
+      city: form.city.trim(),
+      state: form.state,
+      instagram: form.instagram.trim(),
+    };
+    const nextStoreInfo = {
+      ...(storeInfo || {}),
+      ...businessUpdate,
+    };
+    const nextOnboardingData = {
+      ...(profile?.onboardingData || {}),
+      ...businessUpdate,
+      storeSlug: nextStoreInfo.storeSlug,
+      storeUrl: nextStoreInfo.storeUrl,
+    };
+    const nextOnboardingDraft = {
+      ...(profile?.onboardingDraft || {}),
+      ...businessUpdate,
+      storeSlug: nextStoreInfo.storeSlug,
+      storeUrl: nextStoreInfo.storeUrl,
+    };
+
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'stores', userId), {
+        ...businessUpdate,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      await setDoc(doc(db, 'users', userId), {
+        ...businessUpdate,
+        onboardingData: nextOnboardingData,
+        onboardingDraft: nextOnboardingDraft,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      await publishPublicStore(nextStoreInfo, userId);
+
+      onBusinessSaved(nextStoreInfo);
+      setEditing(false);
+      setSuccess('Business information updated.');
+    } catch (saveError) {
+      setError(saveError?.message || 'Business information could not be saved. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="business-info-view">
+        <div className="detail-list">
+          <DetailRow label="Business name" value={storeInfo.businessName || profile?.businessName} />
+          <DetailRow label="Business type" value={titleCase(storeInfo.businessType || profile?.businessType)} />
+          <DetailRow label="Phone" value={storeInfo.phone || profile?.phone} />
+          <DetailRow label="Location" value={[storeInfo.city || profile?.city, storeInfo.state || profile?.state].filter(Boolean).join(', ')} />
+          <DetailRow label="Instagram" value={storeInfo.instagram || profile?.instagram} />
+          <DetailRow label="Delivery fee" value={formatCurrency(storeInfo.deliveryFee)} />
+          <DetailRow label="Store slug" value={storeInfo.storeSlug || profile?.storeSlug} />
+        </div>
+        {success && <div className="form-alert success">{success}</div>}
+        <button type="button" className="secondary-action" onClick={startEditing}>
+          <IconEdit size={16} />
+          Edit business info
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form className="business-info-form" onSubmit={handleSubmit}>
+      <div className="product-form-grid">
+        <label className="field-group">
+          <span>Business name</span>
+          <input value={form.businessName} onChange={(event) => updateField('businessName', event.target.value)} placeholder="Chioma's Fashion Hub" maxLength="50" />
+        </label>
+        <label className="field-group">
+          <span>Business type</span>
+          <select value={form.businessType} onChange={(event) => updateField('businessType', event.target.value)}>
+            <option value="">Select type</option>
+            {businessTypeOptions.map((type) => (
+              <option key={type.value} value={type.value}>{type.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field-group full">
+          <span>Description</span>
+          <textarea value={form.description} onChange={(event) => updateField('description', event.target.value)} placeholder="What do you sell?" rows="3" maxLength="200" />
+        </label>
+        <label className="field-group">
+          <span>Phone</span>
+          <input inputMode="tel" value={form.phone} onChange={(event) => updateField('phone', event.target.value)} placeholder="08012345678" />
+        </label>
+        <label className="field-group">
+          <span>Instagram</span>
+          <input value={form.instagram} onChange={(event) => updateField('instagram', event.target.value)} placeholder="@yourbrand" />
+        </label>
+        <label className="field-group">
+          <span>City</span>
+          <input value={form.city} onChange={(event) => updateField('city', event.target.value)} placeholder="Lagos" />
+        </label>
+        <label className="field-group">
+          <span>State</span>
+          <select value={form.state} onChange={(event) => updateField('state', event.target.value)}>
+            <option value="">Select state</option>
+            {nigerianStates.map((state) => (
+              <option key={state} value={state}>{state}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {error && <div className="form-alert error">{error}</div>}
+      {success && <div className="form-alert success">{success}</div>}
+
+      <div className="form-actions">
+        <button type="button" className="secondary-action" onClick={resetForm} disabled={saving}>Cancel</button>
+        <button type="submit" className="product-submit" disabled={saving}>
+          {saving ? 'Saving...' : 'Save business info'}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -1585,6 +1788,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           letter-spacing: .04em;
         }
         .field-group input,
+        .field-group select,
         .field-group textarea {
           width: 100%;
           border: 1px solid var(--line);
@@ -1596,11 +1800,47 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           padding: 12px 13px;
           outline: none;
         }
+        .field-group select {
+          appearance: none;
+          cursor: pointer;
+        }
         .field-group textarea { resize: vertical; min-height: 84px; }
         .field-group input:focus,
+        .field-group select:focus,
         .field-group textarea:focus {
           border-color: #9bdc00;
           box-shadow: 0 0 0 4px rgba(175,255,0,.15);
+        }
+        .business-info-view,
+        .business-info-form {
+          display: grid;
+          gap: 14px;
+        }
+        .form-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .secondary-action {
+          width: fit-content;
+          border: 1px solid rgba(25,35,40,.12);
+          border-radius: 999px;
+          background: #fff;
+          color: var(--ink);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px 16px;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+        .secondary-action:disabled {
+          opacity: .65;
+          cursor: not-allowed;
         }
         .image-drop {
           min-height: 190px;
@@ -1938,15 +2178,17 @@ export default function Dashboard({ user, userProfile, onLogout }) {
               <div className="card-header">
                 <h3>Business Information</h3>
               </div>
-              <div className="detail-list">
-                <DetailRow label="Business name" value={businessName} />
-                <DetailRow label="Business type" value={titleCase(storeInfo.businessType || profile?.businessType)} />
-                <DetailRow label="Phone" value={storeInfo.phone || profile?.phone} />
-                <DetailRow label="Location" value={[storeInfo.city || profile?.city, storeInfo.state || profile?.state].filter(Boolean).join(', ')} />
-                <DetailRow label="Instagram" value={storeInfo.instagram || profile?.instagram} />
-                <DetailRow label="Delivery fee" value={formatCurrency(storeInfo.deliveryFee)} />
-                <DetailRow label="Store slug" value={storeSlug} />
-              </div>
+              <BusinessInfoEditor
+                userId={user.uid}
+                profile={profile}
+                storeInfo={{
+                  ...storeInfo,
+                  businessName,
+                  storeSlug,
+                  storeUrl,
+                }}
+                onBusinessSaved={(nextStoreInfo) => setStore((current) => ({ ...(current || storeInfo), ...nextStoreInfo }))}
+              />
             </div>
           )}
 
