@@ -11,7 +11,16 @@ import {
 import { db } from './firebase';
 import { createStoreSlug, getStoreUrl } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
-import { colorPresets, getReadableTextColor, getStoreTemplate, storeTemplates } from './storeTemplates';
+import {
+  colorPresets,
+  defaultStoreCopy,
+  getStoreCopy,
+  getStoreSocialLinks,
+  getTemplateTheme,
+  getStoreTemplate,
+  socialLinkFields,
+  storeTemplates,
+} from './storeTemplates';
 
 const emptyStats = {
   revenue: 0,
@@ -707,9 +716,34 @@ function BusinessInfoEditor({ userId, profile, storeInfo, onBusinessSaved }) {
   );
 }
 
+const themeColorFields = [
+  { key: 'primaryColor', label: 'Accent color' },
+  { key: 'backgroundColor', label: 'Page background' },
+  { key: 'textColor', label: 'Text color' },
+  { key: 'cardColor', label: 'Card color' },
+  { key: 'buttonColor', label: 'Button color' },
+  { key: 'buttonTextColor', label: 'Button text' },
+];
+
+const copyFieldRows = [
+  { key: 'announcement', label: 'Announcement', placeholder: 'Free delivery this weekend' },
+  { key: 'heroEyebrow', label: 'Hero eyebrow', placeholder: 'New arrivals' },
+  { key: 'heroHeadline', label: 'Hero headline', placeholder: 'Your store name is used if empty' },
+  { key: 'heroSubtext', label: 'Hero text', placeholder: 'A short line about what makes the store special', multiline: true },
+  { key: 'primaryButtonLabel', label: 'Primary button', placeholder: defaultStoreCopy.primaryButtonLabel },
+  { key: 'secondaryButtonLabel', label: 'Call button', placeholder: defaultStoreCopy.secondaryButtonLabel },
+  { key: 'productsHeading', label: 'Products heading', placeholder: defaultStoreCopy.productsHeading },
+  { key: 'productsSubheading', label: 'Products subheading', placeholder: 'Fresh picks from this seller', multiline: true },
+  { key: 'addToCartLabel', label: 'Product button', placeholder: defaultStoreCopy.addToCartLabel },
+  { key: 'checkoutLabel', label: 'Checkout button', placeholder: defaultStoreCopy.checkoutLabel },
+  { key: 'footerText', label: 'Footer text', placeholder: 'Made in Lagos. Delivered nationwide.' },
+];
+
 function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
   const [selectedTemplate, setSelectedTemplate] = useState(storeInfo.template || 'modern');
-  const [primaryColor, setPrimaryColor] = useState(storeInfo.primaryColor || '#AFFF00');
+  const [themeColors, setThemeColors] = useState(() => getTemplateTheme(storeInfo.template || 'modern', storeInfo));
+  const [copy, setCopy] = useState(() => getStoreCopy(storeInfo));
+  const [socials, setSocials] = useState(() => getStoreSocialLinks(storeInfo));
   const [deliveryFee, setDeliveryFee] = useState(storeInfo.deliveryFee ?? '');
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState('');
@@ -732,7 +766,37 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
   const template = getStoreTemplate(selectedTemplate);
   const previewLogo = logoPreview || existingLogoUrl;
   const previewBanner = bannerPreview || existingBannerUrl;
-  const accentTextColor = getReadableTextColor(primaryColor, template.ink);
+  const previewProducts = Array.isArray(storeInfo.products)
+    ? storeInfo.products.filter((product) => product?.name && product?.imageUrl).slice(0, 4)
+    : [];
+  const previewPrimaryImage = previewBanner || previewProducts[0]?.imageUrl || '';
+  const previewSecondaryImage = previewProducts[1]?.imageUrl || previewPrimaryImage;
+
+  const clearMessages = () => {
+    setError('');
+    setSuccess('');
+  };
+
+  const handleTemplateSelect = (templateId) => {
+    setSelectedTemplate(templateId);
+    setThemeColors(getTemplateTheme(templateId));
+    clearMessages();
+  };
+
+  const updateThemeColor = (key, value) => {
+    setThemeColors((current) => ({ ...current, [key]: value }));
+    clearMessages();
+  };
+
+  const updateCopy = (key, value) => {
+    setCopy((current) => ({ ...current, [key]: value }));
+    clearMessages();
+  };
+
+  const updateSocial = (key, value) => {
+    setSocials((current) => ({ ...current, [key]: value }));
+    clearMessages();
+  };
 
   const handleLogoChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -753,8 +817,7 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
 
     setLogoFile(file);
     setLogoPreview(file ? URL.createObjectURL(file) : '');
-    setError('');
-    setSuccess('');
+    clearMessages();
   };
 
   const handleBannerChange = (event) => {
@@ -776,8 +839,7 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
 
     setBannerFile(file);
     setBannerPreview(file ? URL.createObjectURL(file) : '');
-    setError('');
-    setSuccess('');
+    clearMessages();
   };
 
   const handleSubmit = async (event) => {
@@ -801,9 +863,19 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
       const banner = bannerFile
         ? await uploadStoreBanner(bannerFile, `blorbify/banners/${userId}`, setUploadProgress)
         : null;
+      const cleanCopy = Object.entries(copy).reduce((result, [key, value]) => {
+        result[key] = String(value || '').trim();
+        return result;
+      }, {});
+      const cleanSocials = Object.entries(socials).reduce((result, [key, value]) => {
+        result[key] = String(value || '').trim();
+        return result;
+      }, {});
       const appearanceUpdate = {
         template: selectedTemplate,
-        primaryColor,
+        ...themeColors,
+        ...cleanCopy,
+        ...cleanSocials,
         deliveryFee: cleanDeliveryFee,
         logoUrl: logo?.secureUrl || existingLogoUrl || '',
         logoPublicId: logo?.publicId || storeInfo.logoPublicId || '',
@@ -828,13 +900,7 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
         updatedAt: serverTimestamp(),
       }, { merge: true });
       await setDoc(doc(db, 'users', userId), {
-        template: appearanceUpdate.template,
-        primaryColor: appearanceUpdate.primaryColor,
-        deliveryFee: appearanceUpdate.deliveryFee,
-        logoUrl: appearanceUpdate.logoUrl,
-        logoPublicId: appearanceUpdate.logoPublicId,
-        bannerUrl: appearanceUpdate.bannerUrl,
-        bannerPublicId: appearanceUpdate.bannerPublicId,
+        ...appearanceUpdate,
         updatedAt: serverTimestamp(),
       }, { merge: true });
       await publishPublicStore(nextStoreInfo, userId);
@@ -852,6 +918,8 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
       setExistingLogoUrl(appearanceUpdate.logoUrl);
       setExistingBannerUrl(appearanceUpdate.bannerUrl);
       setDeliveryFee(String(appearanceUpdate.deliveryFee));
+      setCopy(getStoreCopy(appearanceUpdate));
+      setSocials(getStoreSocialLinks(appearanceUpdate));
       onAppearanceSaved(nextStoreInfo);
       setSuccess('Storefront appearance updated.');
     } catch (saveError) {
@@ -868,83 +936,117 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
         <div>
           <span className="control-label">Template</span>
           <div className="template-choice-grid">
-            {storeTemplates.map((storeTemplate) => (
-              <button
-                key={storeTemplate.id}
-                type="button"
-                className={`template-choice ${selectedTemplate === storeTemplate.id ? 'selected' : ''}`}
-                onClick={() => {
-                  setSelectedTemplate(storeTemplate.id);
-                  setError('');
-                  setSuccess('');
-                }}
-              >
-                <span className={`template-swatch preview-${storeTemplate.id}`} style={{ '--preview-accent': storeTemplate.accent, '--preview-ink': storeTemplate.ink, '--preview-surface': storeTemplate.surface }}>
-                  <i />
-                  <b />
-                  <em />
-                </span>
-                <strong>{storeTemplate.name}</strong>
-                <small>{storeTemplate.description}</small>
-              </button>
-            ))}
+            {storeTemplates.map((storeTemplate) => {
+              const swatchTheme = getTemplateTheme(storeTemplate.id);
+              return (
+                <button
+                  key={storeTemplate.id}
+                  type="button"
+                  className={`template-choice ${selectedTemplate === storeTemplate.id ? 'selected' : ''}`}
+                  onClick={() => handleTemplateSelect(storeTemplate.id)}
+                >
+                  <span className={`template-swatch preview-${storeTemplate.id}`} style={{ '--preview-accent': swatchTheme.primaryColor, '--preview-ink': swatchTheme.textColor, '--preview-surface': swatchTheme.backgroundColor }}>
+                    <i />
+                    <b />
+                    <em />
+                  </span>
+                  <strong>{storeTemplate.name}</strong>
+                  <small>{storeTemplate.description}</small>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div>
-          <span className="control-label">Primary color</span>
+          <span className="control-label">Quick accent colors</span>
           <div className="color-choice-grid">
             {colorPresets.map((color) => (
               <button
                 key={color}
                 type="button"
-                className={`color-choice ${primaryColor === color ? 'selected' : ''}`}
+                className={`color-choice ${themeColors.primaryColor === color ? 'selected' : ''}`}
                 style={{ background: color }}
-                onClick={() => {
-                  setPrimaryColor(color);
-                  setError('');
-                  setSuccess('');
-                }}
+                onClick={() => updateThemeColor('primaryColor', color)}
                 aria-label={`Use ${color}`}
               />
             ))}
-            <label className="custom-color">
-              <input type="color" value={primaryColor} onChange={(event) => setPrimaryColor(event.target.value)} />
-              <span>{primaryColor}</span>
-            </label>
           </div>
         </div>
 
         <div>
-          <span className="control-label">Store logo</span>
-          <label className={`image-drop logo-drop ${previewLogo ? 'has-image' : ''}`}>
-            {previewLogo ? (
-              <img src={previewLogo} alt="Store logo preview" />
-            ) : (
-              <span>
-                <IconImage size={24} />
-                Upload store logo
-              </span>
-            )}
-            <input type="file" accept="image/*" onChange={handleLogoChange} />
-          </label>
-          <p className="image-help">Square PNG, JPG, or WEBP works best. The image is uploaded with Cloudinary.</p>
+          <span className="control-label">Custom colors</span>
+          <div className="color-input-grid">
+            {themeColorFields.map((field) => (
+              <label key={field.key} className="color-input-row">
+                <span>{field.label}</span>
+                <input type="color" value={themeColors[field.key]} onChange={(event) => updateThemeColor(field.key, event.target.value)} />
+                <b>{themeColors[field.key]}</b>
+              </label>
+            ))}
+          </div>
         </div>
 
         <div>
-          <span className="control-label">Hero banner</span>
-          <label className={`image-drop banner-drop ${previewBanner ? 'has-image' : ''}`}>
-            {previewBanner ? (
-              <img src={previewBanner} alt="Store hero banner preview" />
-            ) : (
-              <span>
-                <IconImage size={24} />
-                Upload hero banner
-              </span>
-            )}
-            <input type="file" accept="image/*" onChange={handleBannerChange} />
-          </label>
-          <p className="image-help">Use a wide product, shop, or brand image. It will appear in the storefront hero section.</p>
+          <span className="control-label">Store media</span>
+          <div className="media-grid">
+            <div>
+              <label className={`image-drop logo-drop ${previewLogo ? 'has-image' : ''}`}>
+                {previewLogo ? (
+                  <img src={previewLogo} alt="Store logo preview" />
+                ) : (
+                  <span>
+                    <IconImage size={24} />
+                    Upload store logo
+                  </span>
+                )}
+                <input type="file" accept="image/*" onChange={handleLogoChange} />
+              </label>
+              <p className="image-help">Square PNG, JPG, or WEBP works best.</p>
+            </div>
+            <div>
+              <label className={`image-drop banner-drop ${previewBanner ? 'has-image' : ''}`}>
+                {previewBanner ? (
+                  <img src={previewBanner} alt="Store hero banner preview" />
+                ) : (
+                  <span>
+                    <IconImage size={24} />
+                    Upload hero banner
+                  </span>
+                )}
+                <input type="file" accept="image/*" onChange={handleBannerChange} />
+              </label>
+              <p className="image-help">Use a wide product, shop, or brand image.</p>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <span className="control-label">Store text</span>
+          <div className="copy-grid">
+            {copyFieldRows.map((field) => (
+              <label key={field.key} className={`field-group ${field.multiline ? 'full' : ''}`}>
+                <span>{field.label}</span>
+                {field.multiline ? (
+                  <textarea value={copy[field.key]} onChange={(event) => updateCopy(field.key, event.target.value)} placeholder={field.placeholder} rows="3" />
+                ) : (
+                  <input value={copy[field.key]} onChange={(event) => updateCopy(field.key, event.target.value)} placeholder={field.placeholder} />
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <span className="control-label">Social links</span>
+          <div className="copy-grid">
+            {socialLinkFields.map((field) => (
+              <label key={field.key} className="field-group">
+                <span>{field.label}</span>
+                <input value={socials[field.key] || ''} onChange={(event) => updateSocial(field.key, event.target.value)} placeholder={field.placeholder} />
+              </label>
+            ))}
+          </div>
         </div>
 
         <label className="field-group">
@@ -954,8 +1056,7 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
             value={deliveryFee}
             onChange={(event) => {
               setDeliveryFee(event.target.value);
-              setError('');
-              setSuccess('');
+              clearMessages();
             }}
             placeholder="1500"
           />
@@ -979,21 +1080,70 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
         </button>
       </div>
 
-      <div className={`appearance-live-preview storefront-${template.id}`} style={{ '--preview-accent': primaryColor, '--preview-accent-text': accentTextColor, '--preview-ink': template.ink, '--preview-surface': template.surface }}>
+      <div
+        className={`appearance-live-preview storefront-${template.id}`}
+        style={{
+          '--preview-accent': themeColors.primaryColor,
+          '--preview-accent-text': themeColors.buttonTextColor,
+          '--preview-ink': themeColors.textColor,
+          '--preview-surface': themeColors.backgroundColor,
+          '--preview-card': themeColors.cardColor,
+          '--preview-button': themeColors.buttonColor,
+          '--preview-button-text': themeColors.buttonTextColor,
+        }}
+      >
         <div className="preview-shell">
+          {copy.announcement && <div className="preview-announcement">{copy.announcement}</div>}
           <div className="preview-nav">
-            <span className="preview-logo">
-              {previewLogo ? <img src={previewLogo} alt="" /> : (storeInfo.businessName || 'S').charAt(0)}
-            </span>
-            <div>
-              <strong>{storeInfo.businessName || 'Your store'}</strong>
-              <small>{storeInfo.businessType || 'Online store'}</small>
+            <div className="preview-brand">
+              <span className="preview-logo">
+                {previewLogo ? <img src={previewLogo} alt="" /> : (storeInfo.businessName || 'S').charAt(0)}
+              </span>
+              <div>
+                <strong>{storeInfo.businessName || 'Your store'}</strong>
+                <small>{storeInfo.businessType || 'Online store'}</small>
+              </div>
+            </div>
+            <div className="preview-links" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="preview-actions" aria-hidden="true">
+              <i />
+              <i />
             </div>
           </div>
-          <div className={`preview-hero ${previewBanner ? 'has-banner' : ''}`} style={previewBanner ? { backgroundImage: `linear-gradient(rgba(15,21,24,.5), rgba(15,21,24,.5)), url("${previewBanner}")` } : undefined}>
-            <span>{storeInfo.city || 'Open online'}</span>
-            <h4>{storeInfo.businessName || 'Your store'}</h4>
-            <p>{storeInfo.description || 'Browse our products and contact us to place your order.'}</p>
+          <div className={`preview-hero ${previewPrimaryImage ? 'has-banner' : ''}`}>
+            <div className="preview-hero-copy">
+              <span>{copy.heroEyebrow || storeInfo.city || 'Open online'}</span>
+              <h4>{copy.heroHeadline || storeInfo.businessName || 'Your store'}</h4>
+              <p>{copy.heroSubtext || storeInfo.description || 'Browse our products and contact us to place your order.'}</p>
+              <button type="button">{copy.primaryButtonLabel || defaultStoreCopy.primaryButtonLabel}</button>
+            </div>
+            <div className="preview-visual" aria-hidden="true">
+              <div className="preview-frame main">
+                {previewPrimaryImage && <img src={previewPrimaryImage} alt="" />}
+              </div>
+              <div className="preview-frame small">
+                {previewSecondaryImage && <img src={previewSecondaryImage} alt="" />}
+              </div>
+              <div className="preview-float">5.0</div>
+            </div>
+          </div>
+          <div className="preview-benefits" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="preview-product-strip" aria-hidden="true">
+            {(previewProducts.length ? previewProducts : [null, null, null]).slice(0, 3).map((product, index) => (
+              <div className="preview-product" key={product?.id || product?.imageUrl || index}>
+                {product?.imageUrl && <img src={product.imageUrl} alt="" />}
+                <b />
+                <span />
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1521,6 +1671,37 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .template-swatch.preview-bold b { background: #fff; }
         .template-swatch.preview-bold em { background: rgba(255,255,255,.36); }
         .template-swatch.preview-minimal { background: #fff; }
+        .template-swatch.preview-oakmoss {
+          background: #FAF7F1;
+          border-color: #E7E0D2;
+          grid-template-columns: 1.05fr .95fr;
+          grid-template-rows: 1fr auto auto;
+          align-content: stretch;
+          gap: 6px;
+        }
+        .template-swatch.preview-oakmoss i {
+          grid-row: 1 / 4;
+          width: auto;
+          height: auto;
+          border-radius: 16px;
+          background:
+            linear-gradient(135deg, rgba(31,61,43,.15), rgba(198,149,47,.25)),
+            #F1ECE1;
+          box-shadow: 0 12px 20px -14px rgba(22,21,15,.34);
+        }
+        .template-swatch.preview-oakmoss b {
+          align-self: end;
+          width: 100%;
+          height: 24px;
+          border-radius: 12px;
+          background: #1F3D2B;
+        }
+        .template-swatch.preview-oakmoss em {
+          width: 72%;
+          height: 8px;
+          border-radius: 999px;
+          background: #C6952F;
+        }
         .color-choice-grid {
           display: flex;
           align-items: center;
@@ -1559,6 +1740,45 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           overflow: hidden;
           background: transparent;
         }
+        .color-input-grid,
+        .copy-grid,
+        .media-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+        .color-input-row {
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: #fff;
+          padding: 10px;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 36px;
+          gap: 8px;
+          align-items: center;
+          min-width: 0;
+        }
+        .color-input-row span {
+          color: var(--slate);
+          font-size: 12px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: .04em;
+        }
+        .color-input-row input {
+          width: 36px;
+          height: 36px;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          cursor: pointer;
+        }
+        .color-input-row b {
+          grid-column: 1 / -1;
+          color: var(--ink);
+          font-size: 12px;
+          font-weight: 900;
+        }
         .logo-drop {
           min-height: 132px;
         }
@@ -1584,12 +1804,33 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           display: grid;
           align-content: center;
         }
+        .appearance-live-preview.storefront-oakmoss {
+          background: #FAF7F1;
+          color: #16150F;
+        }
         .preview-shell {
           border-radius: 8px;
-          background: #fff;
+          background: var(--preview-card);
           border: 1px solid color-mix(in srgb, var(--preview-ink) 10%, transparent);
           padding: 16px;
           box-shadow: 0 16px 36px rgba(25,35,40,.1);
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-shell {
+          border-radius: 18px;
+          background: #FAF7F1;
+          border-color: #E7E0D2;
+          box-shadow: 0 24px 54px rgba(22,21,15,.12);
+        }
+        .preview-announcement {
+          border-radius: 8px;
+          background: var(--preview-ink);
+          color: var(--preview-surface);
+          padding: 8px 10px;
+          margin-bottom: 14px;
+          text-align: center;
+          font-size: 11px;
+          font-weight: 900;
+          overflow-wrap: anywhere;
         }
         .appearance-live-preview.storefront-bold .preview-shell {
           background: var(--preview-ink);
@@ -1597,7 +1838,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         }
         .appearance-live-preview.storefront-elegant .preview-shell,
         .appearance-live-preview.storefront-elegant .preview-logo { border-radius: 0; }
-        .appearance-live-preview.storefront-minimal .preview-shell {
+          .appearance-live-preview.storefront-minimal .preview-shell {
           box-shadow: none;
           background: transparent;
           padding-left: 0;
@@ -1606,8 +1847,15 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .preview-nav {
           display: flex;
           align-items: center;
+          justify-content: space-between;
           gap: 10px;
           margin-bottom: 18px;
+          min-width: 0;
+        }
+        .preview-brand {
+          display: flex;
+          align-items: center;
+          gap: 10px;
           min-width: 0;
         }
         .preview-logo {
@@ -1628,6 +1876,14 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           object-fit: cover;
           display: block;
         }
+        .appearance-live-preview.storefront-oakmoss .preview-logo {
+          width: 34px;
+          height: 34px;
+          border-radius: 9px;
+          background: #C6952F;
+          color: #231a02;
+          font-family: Georgia, serif;
+        }
         .preview-nav strong {
           display: block;
           font-size: 14px;
@@ -1640,6 +1896,35 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           font-size: 11px;
           margin-top: 2px;
         }
+        .preview-links {
+          display: none;
+          gap: 8px;
+          flex: 1;
+          justify-content: center;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-links {
+          display: flex;
+        }
+        .preview-links span {
+          width: clamp(22px, 4vw, 42px);
+          height: 5px;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--preview-ink) 22%, transparent);
+        }
+        .preview-actions {
+          display: none;
+          gap: 6px;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-actions {
+          display: flex;
+        }
+        .preview-actions i {
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          border: 1px solid color-mix(in srgb, var(--preview-ink) 18%, transparent);
+          background: rgba(255,255,255,.45);
+        }
         .preview-hero {
           border-radius: 8px;
           border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
@@ -1647,17 +1932,25 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           background: rgba(255,255,255,.55);
           background-position: center;
           background-size: cover;
+          display: grid;
+          gap: 16px;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-hero {
+          grid-template-columns: minmax(0, .95fr) minmax(130px, .85fr);
+          align-items: center;
+          border: 0;
+          background: transparent;
+          padding: 10px 0 18px;
         }
         .appearance-live-preview.storefront-bold .preview-hero {
           border-color: rgba(255,255,255,.14);
           background: rgba(255,255,255,.06);
         }
         .preview-hero.has-banner {
-          color: #fff;
-          min-height: 210px;
-          display: grid;
-          align-content: end;
           border-color: rgba(255,255,255,.18);
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-hero.has-banner {
+          color: #16150F;
         }
         .preview-hero span {
           display: inline-flex;
@@ -1672,6 +1965,22 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           letter-spacing: .08em;
           margin-bottom: 10px;
         }
+        .appearance-live-preview.storefront-oakmoss .preview-hero-copy > span {
+          background: transparent;
+          color: #1F3D2B;
+          padding: 0;
+          border-radius: 0;
+          font-size: 9px;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-hero-copy > span::before {
+          content: "";
+          width: 16px;
+          height: 1px;
+          background: #C6952F;
+          display: inline-block;
+          margin-right: 7px;
+          vertical-align: middle;
+        }
         .preview-hero h4 {
           margin: 0;
           font-size: clamp(24px, 4vw, 36px);
@@ -1679,14 +1988,146 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           letter-spacing: 0;
           overflow-wrap: anywhere;
         }
+        .appearance-live-preview.storefront-oakmoss .preview-hero h4 {
+          font-family: Georgia, serif;
+          font-weight: 600;
+          font-size: clamp(26px, 4vw, 42px);
+          line-height: 1.03;
+        }
         .preview-hero p {
           margin: 10px 0 0;
           color: color-mix(in srgb, currentColor 66%, transparent);
           font-size: 13px;
           line-height: 1.5;
         }
+        .appearance-live-preview.storefront-oakmoss .preview-hero p {
+          color: #625A49;
+          max-width: 280px;
+        }
+        .preview-hero button {
+          margin-top: 14px;
+          border: 0;
+          border-radius: 999px;
+          background: var(--preview-button);
+          color: var(--preview-button-text);
+          padding: 9px 13px;
+          font: inherit;
+          font-size: 12px;
+          font-weight: 900;
+        }
         .preview-hero.has-banner p {
-          color: rgba(255,255,255,.82);
+          color: color-mix(in srgb, currentColor 66%, transparent);
+        }
+        .preview-visual {
+          display: none;
+          position: relative;
+          aspect-ratio: 1 / 1;
+          min-height: 160px;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-visual {
+          display: block;
+        }
+        .preview-frame {
+          position: absolute;
+          overflow: hidden;
+          background: #F1ECE1;
+          box-shadow: 0 18px 34px -18px rgba(22,21,15,.34);
+        }
+        .preview-frame.main {
+          width: 76%;
+          height: 82%;
+          top: 0;
+          left: 0;
+          border-radius: 18px;
+        }
+        .preview-frame.small {
+          width: 46%;
+          height: 52%;
+          right: 0;
+          bottom: 0;
+          border: 5px solid #FAF7F1;
+          border-radius: 16px;
+        }
+        .preview-frame img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .preview-float {
+          position: absolute;
+          top: 8px;
+          right: 0;
+          border-radius: 10px;
+          background: #fff;
+          color: #1F3D2B;
+          padding: 7px 9px;
+          font-size: 11px;
+          font-weight: 900;
+          box-shadow: 0 12px 26px -16px rgba(22,21,15,.42);
+        }
+        .preview-benefits {
+          display: none;
+          border-top: 1px solid #E7E0D2;
+          border-bottom: 1px solid #E7E0D2;
+          background: #F1ECE1;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+          padding: 10px;
+          margin: 4px -16px 16px;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-benefits {
+          display: grid;
+        }
+        .preview-benefits span {
+          height: 7px;
+          border-radius: 999px;
+          background: color-mix(in srgb, #16150F 24%, transparent);
+        }
+        .preview-product-strip {
+          display: none;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .appearance-live-preview.storefront-oakmoss .preview-product-strip {
+          display: grid;
+        }
+        .preview-product {
+          min-width: 0;
+        }
+        .preview-product::before {
+          content: "";
+          display: block;
+          aspect-ratio: 4 / 5;
+          border-radius: 14px;
+          background: #F1ECE1;
+        }
+        .preview-product:has(img)::before {
+          display: none;
+        }
+        .preview-product img {
+          width: 100%;
+          aspect-ratio: 4 / 5;
+          object-fit: cover;
+          border-radius: 14px;
+          display: block;
+          background: #F1ECE1;
+        }
+        .preview-product b,
+        .preview-product span {
+          display: block;
+          border-radius: 999px;
+          background: color-mix(in srgb, #16150F 20%, transparent);
+        }
+        .preview-product b {
+          width: 78%;
+          height: 7px;
+          margin-top: 8px;
+        }
+        .preview-product span {
+          width: 46%;
+          height: 6px;
+          margin-top: 5px;
         }
         .orders-list { display: grid; gap: 10px; }
         .order-row {
@@ -2053,6 +2494,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           .content-grid { grid-template-columns: 1fr; }
           .product-layout,
           .appearance-editor { grid-template-columns: 1fr; }
+          .media-grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 780px) {
           .dashboard-sidebar { transform: translateX(-100%); }
@@ -2074,6 +2516,8 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           .status-pill { justify-self: start; }
           .product-form-grid,
           .product-grid,
+          .color-input-grid,
+          .copy-grid,
           .template-choice-grid { grid-template-columns: 1fr; }
         }
       `}</style>
