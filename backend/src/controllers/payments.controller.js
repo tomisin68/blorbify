@@ -82,6 +82,18 @@ export const initializeSubscriptionPayment = asyncHandler(async (req, res) => {
   }, 201);
 });
 
+async function verifyAndApplySubscription(reference, source) {
+  const verificationResponse = await verifyPaystackTransaction(reference);
+  const verificationData = verificationResponse.data || {};
+  const result = await applyVerifiedPayment({
+    reference,
+    verificationData,
+    source,
+  });
+
+  return { verificationData, result };
+}
+
 export const verifySubscriptionPayment = asyncHandler(async (req, res) => {
   const reference = req.params.reference || req.query.reference;
 
@@ -89,13 +101,24 @@ export const verifySubscriptionPayment = asyncHandler(async (req, res) => {
     throw createHttpError(400, 'Payment reference is required.');
   }
 
-  const verificationResponse = await verifyPaystackTransaction(reference);
-  const verificationData = verificationResponse.data || {};
-  const result = await applyVerifiedPayment({
-    reference,
-    verificationData,
-    source: 'verify',
+  const { verificationData, result } = await verifyAndApplySubscription(reference, 'verify');
+
+  return ok(res, {
+    data: {
+      verification: verificationData,
+      result,
+    },
   });
+});
+
+export const relaySubscriptionPayment = asyncHandler(async (req, res) => {
+  const reference = req.body?.reference;
+
+  if (!reference) {
+    throw createHttpError(400, 'reference is required.');
+  }
+
+  const { verificationData, result } = await verifyAndApplySubscription(reference, 'webhook-relay');
 
   return ok(res, {
     data: {
