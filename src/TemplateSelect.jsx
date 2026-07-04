@@ -41,6 +41,37 @@ export default function Step2_TemplateSelect({ formData, updateFormData, onNext,
         .preview-bold strong { background: #fff; }
         .preview-bold em { background: rgba(255,255,255,0.36); }
         .preview-minimal { background: #fff; }
+        .preview-oakmoss {
+          background: #FAF7F1;
+          border-color: #E7E0D2;
+          grid-template-columns: 1.05fr .95fr;
+          grid-template-rows: 1fr auto auto;
+          align-content: stretch;
+          gap: 8px;
+        }
+        .preview-oakmoss span {
+          grid-row: 1 / 4;
+          width: auto;
+          height: auto;
+          border-radius: 22px;
+          background:
+            linear-gradient(135deg, rgba(31,61,43,.15), rgba(198,149,47,.25)),
+            #F1ECE1;
+          box-shadow: 0 16px 26px -18px rgba(22,21,15,.4);
+        }
+        .preview-oakmoss strong {
+          align-self: end;
+          width: 100%;
+          height: 30px;
+          border-radius: 16px;
+          background: #1F3D2B;
+        }
+        .preview-oakmoss em {
+          width: 72%;
+          height: 9px;
+          border-radius: 999px;
+          background: #C6952F;
+        }
         .template-info { padding: 12px 14px; }
         .template-info h4 { font-size: 15px; font-weight: 800; color: #192328; margin: 0 0 4px; }
         .template-info p { font-size: 13px; color: #5C6B6E; line-height: 1.5; margin: 0; }
