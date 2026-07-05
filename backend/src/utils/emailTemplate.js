@@ -54,6 +54,12 @@ export function renderEmailCodePill(value) {
   return `<span style="display:inline-block; margin-top:2px; padding:4px 10px; border-radius:8px; background:rgba(175,255,0,0.15); color:#afff00; font-family:ui-monospace,Consolas,monospace; font-size:13px;">${value}</span>`;
 }
 
+// A larger, centered variant of the code pill for one-time passcodes, where
+// the code needs to be the visual focal point of the email.
+export function renderEmailCodeBlock(value) {
+  return `<div style="text-align:center; margin:6px 0 4px;"><span style="display:inline-block; padding:14px 26px; border-radius:12px; background:rgba(175,255,0,0.15); color:#afff00; font-family:ui-monospace,Consolas,monospace; font-size:32px; font-weight:700; letter-spacing:8px;">${value}</span></div>`;
+}
+
 export function getDashboardUrl(path = '/dashboard') {
   return `${env.appBaseUrl.replace(/\/+$/g, '')}${path}`;
 }

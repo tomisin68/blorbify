@@ -140,11 +140,50 @@ export async function verifySellerOrderPayment(reference) {
   });
 }
 
+export async function sendEmailOtp(token) {
+  return backendRequest('/auth/otp/send', { method: 'POST', token });
+}
+
+export async function verifyEmailOtp(code, token) {
+  return backendRequest('/auth/otp/verify', { method: 'POST', token, body: { code } });
+}
+
 export async function notifyOrderStatusUpdate({ orderId, status }, token) {
   return backendRequest('/notifications/order-status', {
     method: 'POST',
     token,
     body: { orderId, status },
+  });
+}
+
+export async function sendOrderReceipt({ orderId }, token) {
+  return backendRequest('/notifications/orders/receipt', {
+    method: 'POST',
+    token,
+    body: { orderId },
+  });
+}
+
+export async function createInvoice(payload, token) {
+  return backendRequest('/invoices', {
+    method: 'POST',
+    token,
+    body: payload,
+  });
+}
+
+export async function resendInvoice(invoiceId, token) {
+  return backendRequest(`/invoices/${encodeURIComponent(invoiceId)}/resend`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export async function requestFinancialReport(payload, token) {
+  return backendRequest('/reports/financial', {
+    method: 'POST',
+    token,
+    body: payload,
   });
 }
 

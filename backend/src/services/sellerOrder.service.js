@@ -3,6 +3,7 @@ import { adminDb, fieldValue } from '../config/firebaseAdmin.js';
 import { createHttpError } from '../utils/httpError.js';
 import { initializePaystackTransaction } from '../config/paystack.js';
 import { getSellerPayoutProfile } from './sellerPayout.service.js';
+import { sendSellerOrderReceiptEmail } from './receipt.service.js';
 
 const SELLER_ORDERS_COLLECTION = 'sellerOrders';
 const SELLER_LEDGER_COLLECTION = 'sellerLedgers';
@@ -231,7 +232,7 @@ export async function createSellerOrderPaymentIntent({
 export async function applySellerOrderPayment({ reference, verificationData, source = 'webhook' }) {
   const orderRef = adminDb.collection(SELLER_ORDERS_COLLECTION).doc(reference);
 
-  return adminDb.runTransaction(async (transaction) => {
+  const result = await adminDb.runTransaction(async (transaction) => {
     const orderSnap = await transaction.get(orderRef);
 
     if (!orderSnap.exists) {
@@ -348,6 +349,23 @@ export async function applySellerOrderPayment({ reference, verificationData, sou
       },
     };
   });
+
+  // Fire-and-forget, outside the transaction, and only on the one caller that
+  // actually flipped this order to paid — `matched && !alreadyProcessed` is the
+  // same flag the transaction above already uses to guard against the three
+  // call sites (webhook, callback, client verify) double-processing.
+  if (result.matched && !result.alreadyProcessed) {
+    sendSellerOrderReceiptEmail({
+      orderId: result.order.orderId || result.order.metadata?.orderId,
+      sellerId: result.order.sellerId,
+      paymentMethod: 'paystack',
+      paymentReference: reference,
+    }).catch((error) => {
+      console.error('Seller order receipt email failed:', error.message);
+    });
+  }
+
+  return result;
 }
 
 export async function getSellerOrderByReference(reference) {

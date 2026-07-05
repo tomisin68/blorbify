@@ -45,16 +45,29 @@ function buildOrderItems(cart) {
   }));
 }
 
-function buildWhatsAppOrderMessage({ storeName, name, phone, items, total, note }) {
+// Puts the first item's product link on its own line so WhatsApp unfurls it into an
+// image preview card, the same og:image middleware used when a customer shares a product
+// (see middleware.js) — WhatsApp only generates a preview for the first URL in a message.
+function buildProductLinkUrl(storeSlug, productId) {
+  if (!storeSlug || !productId) return '';
+  return `${window.location.origin}/${storeSlug}?${new URLSearchParams({ product: productId }).toString()}`;
+}
+
+function buildWhatsAppOrderMessage({ storeName, storeSlug, name, phone, items, total, note }) {
+  const featuredLink = buildProductLinkUrl(storeSlug, items[0]?.productId);
+
   const lines = [
     `Hi ${storeName || 'there'}, I'd like to order:`,
     '',
     ...items.map((item) => `• ${item.quantity} x ${item.name} — ${formatCurrency(item.subtotal)}`),
+  ];
+  if (featuredLink) lines.push('', featuredLink);
+  lines.push(
     '',
     `Total: ${formatCurrency(total)}`,
     `Name: ${name}`,
     `Phone: ${phone}`,
-  ];
+  );
   if (note) lines.push(`Note: ${note}`);
   return lines.join('\n');
 }
@@ -378,6 +391,7 @@ export default function Storefront({ slug }) {
     const orderItems = buildOrderItems(cart);
     const message = buildWhatsAppOrderMessage({
       storeName: store.businessName,
+      storeSlug: store.storeSlug || slug,
       name,
       phone,
       items: orderItems,

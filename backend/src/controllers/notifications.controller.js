@@ -9,6 +9,7 @@ import {
   sendLowStockEmail,
   sendOrderStatusEmail,
 } from '../services/notification.service.js';
+import { sendSellerOrderReceiptEmail } from '../services/receipt.service.js';
 import { escapeHtml, getDashboardUrl, renderEmailCodePill, renderEmailLayout } from '../utils/emailTemplate.js';
 
 export const sendWelcomeEmail = asyncHandler(async (req, res) => {
@@ -79,6 +80,30 @@ export const sendOrderStatusUpdate = asyncHandler(async (req, res) => {
   }
 
   const result = await sendOrderStatusEmail({ order, status, storeName: order.storeName });
+  return ok(res, { data: result });
+});
+
+export const sendOrderReceipt = asyncHandler(async (req, res) => {
+  const { orderId } = req.body || {};
+  if (!orderId) {
+    throw createHttpError(400, 'orderId is required.');
+  }
+
+  const orderSnap = await adminDb.collection('orders').doc(orderId).get();
+  if (!orderSnap.exists) {
+    throw createHttpError(404, 'Order not found.');
+  }
+
+  const order = orderSnap.data();
+  if (order.storeId !== req.user?.uid) {
+    throw createHttpError(403, 'You do not have access to this order.');
+  }
+
+  const result = await sendSellerOrderReceiptEmail({
+    orderId,
+    sellerId: req.user.uid,
+    paymentMethod: order.paymentMethod || 'whatsapp',
+  });
   return ok(res, { data: result });
 });
 

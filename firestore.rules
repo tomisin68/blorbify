@@ -82,6 +82,14 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.storeId == request.auth.uid;
     }
 
+    // Invoices are only ever written by the backend (admin SDK, which bypasses
+    // these rules) so the stored doc, the emailed PDF, and the sent email stay
+    // in sync — the client only reads its own list of invoices.
+    match /invoices/{invoiceId} {
+      allow read: if isSignedIn() && resource.data.sellerId == request.auth.uid;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

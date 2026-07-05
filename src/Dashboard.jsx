@@ -29,6 +29,8 @@ import { buildPublicStorePayload } from './publicStore';
 import { getProductImages, getProductCoverImage, MAX_PRODUCT_IMAGES } from './productImages';
 import SellerPayoutPanel from './SellerPayoutPanel';
 import BillingPanel from './BillingPanel';
+import InvoicesPanel from './InvoicesPanel';
+import ReportsPanel from './ReportsPanel';
 import AnalyticsPanel from './AnalyticsPanel';
 import {
   colorPresets,
@@ -42,7 +44,8 @@ import {
 import LivePreviewFrame from './storefront/LivePreviewFrame';
 import StarRating from './storefront/StarRating';
 import { nigerianStates } from './nigerianStates';
-import { notifyLowStock, notifyOrderStatusUpdate } from './backendApi';
+import { notifyLowStock, notifyOrderStatusUpdate, sendOrderReceipt } from './backendApi';
+import DashboardTour from './DashboardTour';
 
 const emptyStats = {
   revenue: 0,
@@ -409,6 +412,8 @@ function OrderDetailPage({ orderId }) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [sendingReceipt, setSendingReceipt] = useState(false);
+  const [receiptMessage, setReceiptMessage] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -487,6 +492,21 @@ function OrderDetailPage({ orderId }) {
     }
   };
 
+  const handleSendReceipt = async () => {
+    if (sendingReceipt) return;
+    setSendingReceipt(true);
+    setReceiptMessage('');
+    try {
+      await sendOrderReceipt({ orderId });
+      setReceiptMessage('Receipt emailed to you.');
+    } catch (error) {
+      console.error('Send receipt failed:', error);
+      setReceiptMessage(error.message || 'Could not send the receipt — try again.');
+    } finally {
+      setSendingReceipt(false);
+    }
+  };
+
   return (
     <div className="order-detail">
       <button type="button" className="order-detail-back" onClick={() => navigate('/dashboard/orders')}>
@@ -556,6 +576,20 @@ function OrderDetailPage({ orderId }) {
           >
             Cancel this order
           </button>
+        )}
+
+        {order.paymentMethod === 'whatsapp' && (
+          <div className="order-receipt-action">
+            <button
+              type="button"
+              className="btn-link"
+              disabled={sendingReceipt}
+              onClick={handleSendReceipt}
+            >
+              {sendingReceipt ? 'Sending…' : 'Email me a receipt'}
+            </button>
+            {receiptMessage && <span className="order-receipt-message">{receiptMessage}</span>}
+          </div>
         )}
       </div>
 
@@ -2101,6 +2135,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
   const [loading, setLoading] = useState(Boolean(user?.uid));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ordersError, setOrdersError] = useState('');
+  const [tourOpen, setTourOpen] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -2174,6 +2209,26 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     };
   }, [user?.uid]);
 
+  useEffect(() => {
+    if (!user?.uid || loading) {
+      return undefined;
+    }
+    const tourSeenKey = `blorbify_tour_seen_${user.uid}`;
+    if (localStorage.getItem(tourSeenKey)) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setTourOpen(true), 700);
+    return () => clearTimeout(timer);
+  }, [user?.uid, loading]);
+
+  const closeTour = () => {
+    setTourOpen(false);
+    setSidebarOpen(false);
+    if (user?.uid) {
+      localStorage.setItem(`blorbify_tour_seen_${user.uid}`, '1');
+    }
+  };
+
   const storeInfo = useMemo(() => {
     return store || profile?.onboardingData || profile?.onboardingDraft || {};
   }, [profile, store]);
@@ -2211,6 +2266,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     { id: 'reviews', label: 'Reviews', icon: IconStar },
     { id: 'business', label: 'Business Info', icon: IconStore },
     { id: 'orders', label: 'Orders', icon: IconOrders },
+    { id: 'invoices', label: 'Invoices', icon: IconOrders },
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
     { id: 'logistics', label: 'Logistics', icon: IconTruck },
     { id: 'services', label: 'Services', icon: IconServices },
@@ -2218,6 +2274,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     { id: 'pos', label: 'Sell in Person', icon: IconQr },
     { id: 'payouts', label: 'Payouts', icon: IconWallet },
     { id: 'billing', label: 'Billing', icon: IconWallet },
+    { id: 'reports', label: 'Reports', icon: IconChart },
   ];
 
   if (loading) {
@@ -3619,7 +3676,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
       <div className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
 
       <aside className={`dashboard-sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="dashboard-brand">
+        <div className="dashboard-brand" data-tour="brand">
           <span className="brand-dot" />
           <div>
             <div className="brand-name">Blorbify</div>
@@ -3632,6 +3689,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
             <button
               key={tab.id}
               type="button"
+              data-tour={`nav-${tab.id}`}
               className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => {
                 navigate(tab.id === 'overview' ? '/dashboard' : `/dashboard/${tab.id}`);
@@ -3644,7 +3702,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           ))}
         </nav>
 
-        <div className="dashboard-user">
+        <div className="dashboard-user" data-tour="account">
           <div className="user-chip">
             <div className="avatar">{displayName.charAt(0).toUpperCase()}</div>
             <div>
@@ -3673,7 +3731,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
             <h1>{tabs.find((tab) => tab.id === activeTab)?.label || 'Dashboard'}</h1>
             {activeTab === 'overview' && <p>Welcome back, {displayName}. Your store setup is synced from Firestore.</p>}
           </div>
-          <a className="store-link" href={storeUrl} target="_blank" rel="noreferrer">
+          <a className="store-link" data-tour="store-link" href={storeUrl} target="_blank" rel="noreferrer">
             {storeUrl}
           </a>
         </header>
@@ -3691,7 +3749,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
               <div className="hero-badge">Onboarded</div>
             </section>
 
-            <section className="stats-grid" aria-label="Store stats">
+            <section className="stats-grid" data-tour="stats-grid" aria-label="Store stats">
               <StatCard label="Revenue" value={formatCurrency(stats.revenue)} icon={IconDashboard} tone="lime" />
               <StatCard label="Orders" value={stats.totalOrders} icon={IconOrders} tone="blue" />
               <StatCard label="Customers" value={stats.totalCustomers} icon={IconUsers} tone="orange" />
@@ -3706,7 +3764,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           )}
 
           {activeTab === 'products' && (
-            <div className="content-card full-span">
+            <div className="content-card full-span" data-tour="products-card">
               <div className="card-header">
                 <h3>Add Products</h3>
               </div>
@@ -3887,6 +3945,15 @@ export default function Dashboard({ user, userProfile, onLogout }) {
             </div>
           )}
 
+          {activeTab === 'invoices' && (
+            <div className="content-card full-span">
+              <div className="card-header">
+                <h3>Invoices</h3>
+              </div>
+              <InvoicesPanel user={user} />
+            </div>
+          )}
+
           {activeTab === 'payouts' && (
             <div className="content-card full-span">
               <div className="card-header">
@@ -3904,8 +3971,50 @@ export default function Dashboard({ user, userProfile, onLogout }) {
               <BillingPanel user={user} userProfile={userProfile} />
             </div>
           )}
+
+          {activeTab === 'reports' && (
+            <div className="content-card full-span">
+              <div className="card-header">
+                <h3>Reports</h3>
+              </div>
+              <ReportsPanel user={user} />
+            </div>
+          )}
         </section>
       </main>
+
+      <button
+        type="button"
+        className="tour-trigger"
+        data-tour="tour-trigger"
+        onClick={() => setTourOpen(true)}
+        aria-label="Take the dashboard tour"
+      >
+        ?
+      </button>
+
+      {tourOpen && <DashboardTour navigate={navigate} setSidebarOpen={setSidebarOpen} onFinish={closeTour} />}
+
+      <style>{`
+        .tour-trigger {
+          position: fixed;
+          right: 22px;
+          bottom: 22px;
+          width: 46px;
+          height: 46px;
+          border-radius: 999px;
+          border: none;
+          background: var(--ink);
+          color: var(--signal);
+          font-family: Raleway, system-ui, sans-serif;
+          font-weight: 800;
+          font-size: 18px;
+          cursor: pointer;
+          box-shadow: 0 10px 24px rgba(15,21,24,.3);
+          z-index: 40;
+        }
+        .tour-trigger:hover { background: var(--ink-deep); }
+      `}</style>
     </div>
   );
 }

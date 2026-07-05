@@ -100,6 +100,8 @@ function AppShell() {
   }, [navigate]);
 
   const onboardingCompleted = Boolean(userProfile?.onboardingCompleted);
+  const needsEmailVerification = Boolean(currentUser) && userProfile?.emailVerified === false;
+  const postAuthPath = needsEmailVerification ? "/verify-email" : onboardingCompleted ? "/dashboard" : "/onboarding";
 
   return (
     <Routes>
@@ -111,7 +113,7 @@ function AppShell() {
           authLoading ? (
             <LoadingScreen />
           ) : currentUser ? (
-            <Navigate to={onboardingCompleted ? "/dashboard" : "/onboarding"} replace />
+            <Navigate to={postAuthPath} replace />
           ) : (
             <LandingPage />
           )
@@ -124,7 +126,7 @@ function AppShell() {
           authLoading ? (
             <LoadingScreen />
           ) : currentUser ? (
-            <Navigate to={onboardingCompleted ? "/dashboard" : "/onboarding"} replace />
+            <Navigate to={postAuthPath} replace />
           ) : (
             <AuthScreen initialMode="login" onSuccess={handleAuthSuccess} />
           )
@@ -137,9 +139,29 @@ function AppShell() {
           authLoading ? (
             <LoadingScreen />
           ) : currentUser ? (
-            <Navigate to={onboardingCompleted ? "/dashboard" : "/onboarding"} replace />
+            <Navigate to={postAuthPath} replace />
           ) : (
             <AuthScreen initialMode="signup" onSuccess={handleAuthSuccess} />
+          )
+        }
+      />
+
+      <Route
+        path="/verify-email"
+        element={
+          authLoading ? (
+            <LoadingScreen />
+          ) : !currentUser ? (
+            <Navigate to="/login" replace />
+          ) : !needsEmailVerification ? (
+            <Navigate to={onboardingCompleted ? "/dashboard" : "/onboarding"} replace />
+          ) : (
+            <AuthScreen
+              initialMode="verify"
+              verifyEmail={currentUser.email}
+              onSuccess={handleAuthSuccess}
+              onCancel={handleLogout}
+            />
           )
         }
       />
@@ -151,6 +173,8 @@ function AppShell() {
             <LoadingScreen />
           ) : !currentUser ? (
             <Navigate to="/login" replace />
+          ) : needsEmailVerification ? (
+            <Navigate to="/verify-email" replace />
           ) : (
             <OnboardingScreen
               userId={currentUser.uid}
@@ -170,6 +194,8 @@ function AppShell() {
               <LoadingScreen />
             ) : !currentUser ? (
               <Navigate to="/login" replace />
+            ) : needsEmailVerification ? (
+              <Navigate to="/verify-email" replace />
             ) : !onboardingCompleted ? (
               <Navigate to="/onboarding" replace />
             ) : (

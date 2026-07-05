@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { sendEmailOtp, verifyEmailOtp } from './backendApi';
 
 /* ============================================================
    AUTHENTICATION SCREEN — Blorbify
@@ -144,9 +145,18 @@ function validateEmail(value) {
   return '';
 }
 
-export default function AuthScreen({ initialMode = 'login', onSuccess }) {
+export default function AuthScreen({ initialMode = 'login', verifyEmail = '', onSuccess, onCancel }) {
   const [isLogin, setIsLogin] = useState(initialMode === 'login');
   const [showReset, setShowReset] = useState(false);
+  const [otpStep, setOtpStep] = useState(initialMode === 'verify');
+  const [otpEmail, setOtpEmail] = useState(verifyEmail);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const [otpError, setOtpError] = useState('');
+  const otpSentOnceRef = useRef(false);
+  const otpInputRef = useRef(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [justSucceeded, setJustSucceeded] = useState(false);
@@ -175,6 +185,65 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
 
   const removeToast = (id) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return undefined;
+    const timer = setTimeout(() => setOtpCooldown((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [otpCooldown]);
+
+  const requestOtp = async () => {
+    if (otpSending || !auth.currentUser) return;
+    setOtpSending(true);
+    setOtpError('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const result = await sendEmailOtp(idToken);
+      setOtpCooldown(result?.resendCooldownSeconds || 45);
+      addToast(`We sent a 6-digit code to ${otpEmail}`, 'info');
+      otpInputRef.current?.focus();
+    } catch (error) {
+      addToast(error.message || 'Could not send a verification code. Please try again.', 'error');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (otpStep && !otpSentOnceRef.current) {
+      otpSentOnceRef.current = true;
+      requestOtp();
+    }
+    if (!otpStep) {
+      otpSentOnceRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otpStep]);
+
+  const handleVerifyOtp = async (event) => {
+    event.preventDefault();
+    const trimmed = otpCode.trim();
+    if (!/^\d{6}$/.test(trimmed)) {
+      setOtpError('Enter the 6-digit code from your email.');
+      return;
+    }
+
+    setOtpVerifying(true);
+    setOtpError('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      await verifyEmailOtp(trimmed, idToken);
+      setJustSucceeded(true);
+      addToast('Email verified! Welcome to Blorbify.', 'success');
+      setTimeout(async () => {
+        await onSuccess?.(auth.currentUser);
+      }, 550);
+    } catch (error) {
+      setOtpError(error.message || 'Incorrect code. Please try again.');
+    } finally {
+      setOtpVerifying(false);
+    }
   };
 
   const setFieldError = (field, message) => {
@@ -244,6 +313,10 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
         );
 
         addToast('Welcome back! Your account is ready.', 'success');
+        setJustSucceeded(true);
+        setTimeout(async () => {
+          await onSuccess?.(auth.currentUser);
+        }, 550);
       } else {
         const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
         const user = userCredential.user;
@@ -253,18 +326,16 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           lastName: lastName.trim(),
           email: user.email,
           onboardingCompleted: false,
+          emailVerified: false,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           provider: 'email',
         });
 
-        addToast('Account created! Welcome to Blorbify.', 'success');
+        setOtpEmail(user.email);
+        setOtpStep(true);
+        setLoading(false);
       }
-
-      setJustSucceeded(true);
-      setTimeout(async () => {
-        await onSuccess?.(auth.currentUser);
-      }, 550);
     } catch (error) {
       const message = error?.message || 'Authentication failed. Please try again.';
       addToast(message.replace('Firebase: ', ''), 'error');
@@ -686,6 +757,13 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
 
         .input-wrap input::placeholder { color: var(--slate-dark); font-weight: 400; }
 
+        .otp-input {
+          font-family: 'JetBrains Mono', monospace !important;
+          font-size: 20px !important;
+          letter-spacing: 10px;
+          text-align: center;
+        }
+
         .input-wrap input:-webkit-autofill {
           -webkit-box-shadow: 0 0 0 1000px var(--ink-soft) inset !important;
           -webkit-text-fill-color: var(--paper) !important;
@@ -1026,6 +1104,74 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
                   </button>
                 </form>
               )}
+            </div>
+          ) : otpStep ? (
+            <div className="auth-form-fade" key="verify">
+              <button
+                type="button"
+                className="auth-back-link"
+                onClick={() => {
+                  if (initialMode === 'verify') {
+                    onCancel?.();
+                  } else {
+                    setOtpStep(false);
+                    setOtpCode('');
+                    setOtpError('');
+                  }
+                }}
+              >
+                <IconArrowLeft size={15} /> {initialMode === 'verify' ? 'Sign out' : 'Back'}
+              </button>
+              <div className="auth-header">
+                <h1 className="auth-title">Verify your <em>email</em></h1>
+                <p className="auth-sub">
+                  Enter the 6-digit code we sent to <strong style={{ color: 'var(--paper)' }}>{otpEmail}</strong>.
+                </p>
+              </div>
+
+              <form className="auth-form" onSubmit={handleVerifyOtp}>
+                <div className="form-group">
+                  <label className="form-label">Verification Code</label>
+                  <div className={`input-wrap ${otpError ? 'has-error' : ''}`}>
+                    <span className="input-icon"><IconLock size={18} /></span>
+                    <input
+                      ref={otpInputRef}
+                      className="otp-input"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      placeholder="000000"
+                      value={otpCode}
+                      onChange={(e) => {
+                        setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                        setOtpError('');
+                      }}
+                    />
+                  </div>
+                  {otpError && <div className="field-error"><IconAlert size={13} /> {otpError}</div>}
+                </div>
+
+                <button
+                  type="submit"
+                  className={`btn-auth ${justSucceeded ? 'succeeded' : ''}`}
+                  disabled={otpVerifying || otpCode.length !== 6}
+                >
+                  {justSucceeded ? (
+                    <><IconCheck size={20} /> Verified!</>
+                  ) : otpVerifying ? (
+                    <><span className="spinner" /> Verifying...</>
+                  ) : (
+                    <>Verify email<IconArrow size={18} /></>
+                  )}
+                </button>
+              </form>
+
+              <div className="auth-footer">
+                Didn&rsquo;t get the code?{' '}
+                <button type="button" onClick={requestOtp} disabled={otpSending || otpCooldown > 0}>
+                  {otpSending ? 'Sending...' : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : 'Resend code'}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="auth-form-fade" key={isLogin ? 'login' : 'signup'}>

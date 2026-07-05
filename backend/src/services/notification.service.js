@@ -1,6 +1,6 @@
 import { getMailerTransport, isMailerConfigured, isResendConfigured, sendResendEmail } from '../config/mailer.js';
 import { adminDb, fieldValue } from '../config/firebaseAdmin.js';
-import { escapeHtml, getDashboardUrl, renderEmailCodePill, renderEmailLayout } from '../utils/emailTemplate.js';
+import { escapeHtml, getDashboardUrl, renderEmailCodeBlock, renderEmailCodePill, renderEmailLayout } from '../utils/emailTemplate.js';
 
 export async function queueNotification(notification) {
   const payload = {
@@ -96,6 +96,50 @@ export async function queueWelcomeNotification({ user, subscription }) {
   }
 
   return notification;
+}
+
+export async function sendOtpEmail({ toEmail, name, code, minutes }) {
+  const recipientName = name || 'there';
+  const subject = 'Your Blorbify verification code';
+  const html = renderEmailLayout({
+    preheader: `Your verification code is ${code}`,
+    heading: 'Verify your email',
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Hi ${escapeHtml(recipientName)},</p>
+      <p style="margin:0 0 18px;">Use the code below to verify your email address and finish setting up your Blorbify account. It expires in ${minutes} minutes.</p>
+      ${renderEmailCodeBlock(code)}
+      <p style="margin:16px 0 0; color:#93A2A6; font-size:13px;">Didn&rsquo;t request this? You can safely ignore this email.</p>
+    `,
+    footerNote: 'Sent because someone requested a verification code for this email address on Blorbify.',
+  });
+  const text = `Your Blorbify verification code is ${code}. It expires in ${minutes} minutes.\n\nDidn't request this? You can ignore this email.`;
+
+  return sendEmail({ to: toEmail, subject, html, text, data: { type: 'otp' } });
+}
+
+export async function sendSignupWelcomeEmail({ toEmail, name }) {
+  const recipientName = name || 'there';
+  const subject = 'Welcome to Blorbify — a note from our founder';
+  const dashboardUrl = getDashboardUrl();
+  const html = renderEmailLayout({
+    preheader: 'A personal welcome from the Blorbify team.',
+    heading: 'Welcome to Blorbify 🎉',
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Hi ${escapeHtml(recipientName)},</p>
+      <p style="margin:0 0 14px;">Your email is verified and your account is ready. I&rsquo;m genuinely excited to have you here.</p>
+      <p style="margin:0 0 14px;">Blorbify exists to help you get your business online quickly — a store, delivery, and marketing, all without needing a developer or designer. Whatever you&rsquo;re building, we&rsquo;re rooting for you.</p>
+      <p style="margin:0 0 20px;">If you ever get stuck or have feedback, just reply to this email — it reaches our team directly.</p>
+      <p style="margin:0;">Welcome aboard,<br />
+      <strong style="color:#f6f8f1;">Samuel Oluwabiyi Oluwatomisin</strong><br />
+      Founder &amp; CEO, Blorbify</p>
+    `,
+    ctaLabel: 'Go to your dashboard',
+    ctaUrl: dashboardUrl,
+    footerNote: 'You are receiving this email because you created a Blorbify account.',
+  });
+  const text = `Welcome to Blorbify\n\nHi ${recipientName}, your email is verified and your account is ready.\n\nBlorbify exists to help you get your business online quickly — a store, delivery, and marketing, all without needing a developer or designer.\n\nIf you ever get stuck or have feedback, just reply to this email.\n\nWelcome aboard,\nSamuel Oluwabiyi Oluwatomisin\nFounder & CEO, Blorbify\n\n${dashboardUrl}`;
+
+  return sendEmail({ to: toEmail, subject, html, text, data: { type: 'signup-welcome' } });
 }
 
 const ORDER_STATUS_EMAIL_COPY = {

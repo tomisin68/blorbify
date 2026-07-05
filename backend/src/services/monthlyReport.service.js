@@ -110,6 +110,64 @@ export async function computePlatformMonthlySummary(monthKey) {
   };
 }
 
+// On-demand equivalent of sendSellerMonthlyReportEmail, for an arbitrary date
+// range chosen by the seller from the dashboard rather than a full calendar
+// month — computeSellerLedgerTotals already accepts any {startAt, endAt}, the
+// "monthly" framing elsewhere in this file is just a caller convention.
+export async function sendSellerRangeReportEmail(sellerId, { startAt, endAt, toEmail, rangeLabel }) {
+  const [totals, storeSnap] = await Promise.all([
+    computeSellerLedgerTotals(sellerId, { startAt, endAt }),
+    adminDb.collection('stores').doc(sellerId).get(),
+  ]);
+
+  const storeName = storeSnap.exists ? storeSnap.data()?.businessName || 'Your store' : 'Your store';
+  const summary = { sellerId, storeName, rangeLabel, ...totals };
+
+  if (!toEmail) {
+    return { sent: false, skipped: true, reason: 'no-email', summary };
+  }
+
+  const csv = toCsv(
+    [
+      { metric: 'Gross sales', valueKobo: summary.grossSales },
+      { metric: 'Refunds', valueKobo: summary.refundsTotal },
+      { metric: 'Net revenue', valueKobo: summary.netRevenue },
+      { metric: 'Orders', valueKobo: summary.orderCount },
+    ],
+    [
+      { key: 'metric', header: 'Metric' },
+      { key: 'valueKobo', header: 'Value (kobo)' },
+    ]
+  );
+
+  const subject = `Your financial report (${rangeLabel}) — ${summary.storeName}`;
+  const html = renderEmailLayout({
+    preheader: `Net revenue for ${rangeLabel}: ${formatNaira(summary.netRevenue)}`,
+    heading: `${rangeLabel} report for ${escapeHtml(summary.storeName)}`,
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Here's how ${escapeHtml(summary.storeName)} did for ${escapeHtml(rangeLabel)}:</p>
+      <p style="margin:0 0 6px;">Gross sales: <strong>${formatNaira(summary.grossSales)}</strong></p>
+      <p style="margin:0 0 6px;">Refunds: <strong>${formatNaira(summary.refundsTotal)}</strong></p>
+      <p style="margin:0 0 6px;">Net revenue: <strong>${formatNaira(summary.netRevenue)}</strong></p>
+      <p style="margin:0;">Orders: <strong>${summary.orderCount}</strong></p>
+    `,
+    ctaLabel: 'View your dashboard',
+    ctaUrl: getDashboardUrl(),
+    footerNote: 'Sent because you requested a financial report on Blorbify. A CSV breakdown is attached.',
+  });
+  const text = `${rangeLabel} report for ${summary.storeName}\n\nGross sales: ${formatNaira(summary.grossSales)}\nRefunds: ${formatNaira(summary.refundsTotal)}\nNet revenue: ${formatNaira(summary.netRevenue)}\nOrders: ${summary.orderCount}`;
+
+  const sendResult = await sendEmail({
+    to: toEmail,
+    subject,
+    html,
+    text,
+    attachments: [{ filename: `blorbify-report-${Date.now()}.csv`, content: csv }],
+  });
+
+  return { ...sendResult, summary };
+}
+
 async function sendSellerMonthlyReportEmail(sellerId, monthKey) {
   const [summary, userSnap] = await Promise.all([
     computeSellerMonthlySummary(sellerId, monthKey),
