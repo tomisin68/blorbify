@@ -56,6 +56,18 @@ export async function backendRequest(path, { method = 'GET', body, headers = {},
   return data;
 }
 
+export async function listPlans(token) {
+  return backendRequest('/payments/plans', { method: 'GET', token });
+}
+
+export async function initializeSubscription(payload, token) {
+  return backendRequest('/payments/subscriptions/initialize', {
+    method: 'POST',
+    token,
+    body: payload,
+  });
+}
+
 export async function loadSellerSubaccount(sellerId, token) {
   return backendRequest(`/sellers/${encodeURIComponent(sellerId)}/subaccount`, {
     method: 'GET',

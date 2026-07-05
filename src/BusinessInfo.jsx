@@ -96,10 +96,6 @@ export default function Step1_BusinessInfo({ formData = {}, updateFormData, onNe
   return (
     <div className="step-card">
       <style>{`
-        .step-card {
-          animation: fadeSlide 0.4s ease;
-          display: block;
-        }
         .form-group { margin-bottom: 18px; }
         .form-label {
           display: block;

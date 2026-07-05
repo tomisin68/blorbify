@@ -13,6 +13,7 @@ import { createStoreSlug, getStoreUrl } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
 import { getProductImages, getProductCoverImage, MAX_PRODUCT_IMAGES } from './productImages';
 import SellerPayoutPanel from './SellerPayoutPanel';
+import BillingPanel from './BillingPanel';
 import {
   colorPresets,
   defaultStoreCopy,
@@ -76,6 +77,14 @@ const IconWallet = (props) => (
     <path d="M4.5 7.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-9Z" stroke="currentColor" strokeWidth="1.7" />
     <path d="M17.5 11h2V9.2h-2c-1 0-1.8.8-1.8 1.8v0c0 1 .8 1.8 1.8 1.8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
     <circle cx="14.2" cy="11" r="1" fill="currentColor" />
+  </IconBase>
+);
+
+const IconCreditCard = (props) => (
+  <IconBase {...props}>
+    <rect x="3.5" y="5.5" width="17" height="13" rx="2" stroke="currentColor" strokeWidth="1.7" />
+    <path d="M3.5 9.5h17" stroke="currentColor" strokeWidth="1.7" />
+    <path d="M6.5 14.5h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
   </IconBase>
 );
 
@@ -1275,6 +1284,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     { id: 'business', label: 'Business Info', icon: IconStore },
     { id: 'orders', label: 'Orders', icon: IconOrders },
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
+    { id: 'billing', label: 'Billing', icon: IconCreditCard },
     { id: 'payouts', label: 'Payouts', icon: IconWallet },
   ];
 
@@ -2435,6 +2445,15 @@ export default function Dashboard({ user, userProfile, onLogout }) {
                   {ordersError || 'Your orders will show here as soon as customers start buying.'}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'billing' && (
+            <div className="content-card full-span">
+              <div className="card-header">
+                <h3>Billing</h3>
+              </div>
+              <BillingPanel user={user} profile={profile} />
             </div>
           )}
 

@@ -4,7 +4,7 @@ import { db } from './firebase';
 import BusinessInfo from './BusinessInfo';
 import TemplateSelect from './TemplateSelect';
 import LaunchStore from './LaunchStore';
-import { IconBriefcase, IconPalette, IconRocket, IconSparkles } from './onboardingIcons';
+import { IconBriefcase, IconPalette, IconRocket, IconSparkles, IconCheck } from './onboardingIcons';
 import { createStoreSlug, getStoreUrl } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
 
@@ -52,7 +52,7 @@ const defaultFormData = {
   city: '',
   state: '',
   instagram: '',
-  template: 'minimal',
+  template: 'signature',
   primaryColor: '#AFFF00',
   storeSlug: '',
 };
@@ -170,7 +170,7 @@ export default function OnboardingScreen({ userId, userProfile, onComplete }) {
         city: formData.city || '',
         state: formData.state || '',
         instagram: formData.instagram || '',
-        template: formData.template || 'minimal',
+        template: formData.template || 'signature',
         primaryColor: formData.primaryColor || '#AFFF00',
         storeSlug: slug,
         storeUrl,
@@ -262,6 +262,19 @@ export default function OnboardingScreen({ userId, userProfile, onComplete }) {
             line-height: 1.6;
             max-width: 560px;
           }
+          .progress-track {
+            height: 6px;
+            border-radius: 999px;
+            background: #EFF3E8;
+            overflow: hidden;
+            margin-bottom: 16px;
+          }
+          .progress-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #8FDD00, #AFFF00);
+            transition: width 0.45s cubic-bezier(0.65, 0, 0.35, 1);
+          }
           .step-bar {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -291,25 +304,21 @@ export default function OnboardingScreen({ userId, userProfile, onComplete }) {
             background: #192328;
             color: #F6F8F1;
           }
-          .skip-link {
-            margin-top: 18px;
-            text-align: center;
-            color: #5C6B6E;
-          }
-          .skip-link button {
-            background: none;
-            border: none;
-            color: #2563eb;
-            cursor: pointer;
-            padding: 0;
-            font-weight: 700;
-          }
           .step-card {
             border-radius: 22px;
             background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(246,248,241,0.95));
             border: 1px solid rgba(25,35,40,0.06);
             padding: 24px;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+            animation: stepFadeSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+          }
+          @keyframes stepFadeSlide {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .step-card { animation: none; }
+            .progress-fill { transition: none; }
           }
           .save-error {
             margin: 0 0 14px;
@@ -363,16 +372,25 @@ export default function OnboardingScreen({ userId, userProfile, onComplete }) {
             </div>
           </div>
 
-          <div className="step-bar">
-            {steps.map((step) => (
-              <div key={step.id} className={`step-pill ${currentStep === step.id ? 'active' : ''} ${currentStep > step.id ? 'done' : ''}`}>
-                {step.icon}
-                <span>{step.title}</span>
-              </div>
-            ))}
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${(currentStep / steps.length) * 100}%` }} />
           </div>
 
-          {renderStep()}
+          <div className="step-bar">
+            {steps.map((step) => {
+              const done = currentStep > step.id;
+              return (
+                <div key={step.id} className={`step-pill ${currentStep === step.id ? 'active' : ''} ${done ? 'done' : ''}`}>
+                  {done ? <IconCheck size={14} /> : step.icon}
+                  <span>{step.title}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div key={currentStep}>
+            {renderStep()}
+          </div>
 
           {saveError && <div className="save-error">{saveError}</div>}
         </div>
