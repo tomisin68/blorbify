@@ -304,7 +304,16 @@ function OrderDetailPage({ orderId }) {
   const placedAt = formatOrderTimestamp(order.createdAt);
   const currentStatus = order.status || 'pending';
   const isCancelled = currentStatus === 'cancelled';
+  const isDelivered = currentStatus === 'delivered';
   const currentIndex = ORDER_FLOW_STATUSES.findIndex((step) => step.value === currentStatus);
+  const nextStep = !isCancelled ? ORDER_FLOW_STATUSES[currentIndex + 1] : null;
+
+  const confirmAndUpdate = (status, confirmMessage) => {
+    if (updatingStatus) return;
+    if (window.confirm(confirmMessage)) {
+      updateStatus(status);
+    }
+  };
 
   return (
     <div className="order-detail">
@@ -323,29 +332,56 @@ function OrderDetailPage({ orderId }) {
       <div className="order-timeline">
         {isCancelled && <div className="order-cancelled-banner">This order was cancelled.</div>}
 
-        <div className={`timeline ${isCancelled ? 'is-cancelled' : ''}`}>
+        <div className={`timeline ${isCancelled ? 'is-cancelled' : ''}`} aria-hidden="true">
           {ORDER_FLOW_STATUSES.map((step, index) => {
             const reached = !isCancelled && index <= currentIndex;
             const isCurrent = !isCancelled && index === currentIndex;
             const at = formatOrderTimestamp(getStatusHistoryAt(order, step.value));
             return (
-              <button
+              <div
                 key={step.value}
-                type="button"
                 className={`timeline-step ${reached ? 'reached' : ''} ${isCurrent ? 'current' : ''}`}
-                disabled={updatingStatus || isCancelled}
-                onClick={() => updateStatus(step.value)}
               >
                 <span className="timeline-dot">{reached && !isCurrent ? '✓' : index + 1}</span>
                 <span className="timeline-label">{step.label}</span>
                 <span className="timeline-time">{at || '—'}</span>
-              </button>
+              </div>
             );
           })}
         </div>
 
-        {!isCancelled && currentStatus !== 'delivered' && (
-          <button type="button" className="btn-link btn-link-danger" disabled={updatingStatus} onClick={() => updateStatus('cancelled')}>
+        {isDelivered && !isCancelled && (
+          <p className="order-timeline-complete">✓ This order is complete.</p>
+        )}
+
+        {nextStep && (
+          <button
+            type="button"
+            className="order-primary-action"
+            disabled={updatingStatus}
+            onClick={() => confirmAndUpdate(
+              nextStep.value,
+              `Mark this order as "${nextStep.label}"? The buyer will get an email update.`
+            )}
+          >
+            {updatingStatus ? (
+              <>
+                <span className="btn-spinner" />
+                Updating…
+              </>
+            ) : (
+              `Mark as ${nextStep.label} →`
+            )}
+          </button>
+        )}
+
+        {!isCancelled && !isDelivered && (
+          <button
+            type="button"
+            className="btn-link btn-link-danger"
+            disabled={updatingStatus}
+            onClick={() => confirmAndUpdate('cancelled', 'Cancel this order? The buyer will be notified by email.')}
+          >
             Cancel this order
           </button>
         )}
@@ -2221,13 +2257,8 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           display: grid;
           justify-items: center;
           gap: 4px;
-          border: 0;
-          background: transparent;
-          font: inherit;
           padding: 0 4px 0;
-          cursor: pointer;
         }
-        .timeline-step:disabled { cursor: not-allowed; }
         .timeline-step::before {
           content: '';
           position: absolute;
@@ -2272,6 +2303,33 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         }
         .btn-link-danger { color: #b91c1c; }
         .btn-link:disabled { opacity: .6; cursor: not-allowed; }
+        .order-timeline-complete { margin: 0; font-size: 13px; font-weight: 800; color: var(--ink); }
+        .order-primary-action {
+          justify-self: start;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border: 0;
+          border-radius: 999px;
+          background: var(--ink);
+          color: #fff;
+          padding: 11px 18px;
+          font: inherit;
+          font-size: 13.5px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+        .order-primary-action:hover { opacity: .92; }
+        .order-primary-action:disabled { opacity: .7; cursor: not-allowed; }
+        .btn-spinner {
+          width: 14px;
+          height: 14px;
+          border-radius: 999px;
+          border: 2px solid rgba(255,255,255,.35);
+          border-top-color: #fff;
+          animation: orderBtnSpin .7s linear infinite;
+        }
+        @keyframes orderBtnSpin { to { transform: rotate(360deg); } }
         .empty-state {
           border: 1px dashed var(--line);
           border-radius: 8px;
