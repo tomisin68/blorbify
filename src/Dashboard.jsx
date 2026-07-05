@@ -2400,7 +2400,8 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .content-grid { grid-template-columns: 1fr; }
           .product-layout,
-          .appearance-editor { grid-template-columns: 1fr; }
+          .appearance-editor,
+          .appearance-editor.preview-collapsed { grid-template-columns: 1fr; }
           .media-grid { grid-template-columns: 1fr; }
           .appearance-preview-col { position: static; top: auto; }
         }
