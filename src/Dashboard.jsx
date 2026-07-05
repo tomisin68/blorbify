@@ -12,6 +12,7 @@ import { db } from './firebase';
 import { createStoreSlug, getStoreUrl } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
 import { getProductImages, getProductCoverImage, MAX_PRODUCT_IMAGES } from './productImages';
+import SellerPayoutPanel from './SellerPayoutPanel';
 import {
   colorPresets,
   defaultStoreCopy,
@@ -67,6 +68,14 @@ const IconPalette = (props) => (
     <circle cx="8" cy="10" r="1" fill="currentColor" />
     <circle cx="12" cy="8" r="1" fill="currentColor" />
     <circle cx="16" cy="10" r="1" fill="currentColor" />
+  </IconBase>
+);
+
+const IconWallet = (props) => (
+  <IconBase {...props}>
+    <path d="M4.5 7.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-9Z" stroke="currentColor" strokeWidth="1.7" />
+    <path d="M17.5 11h2V9.2h-2c-1 0-1.8.8-1.8 1.8v0c0 1 .8 1.8 1.8 1.8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    <circle cx="14.2" cy="11" r="1" fill="currentColor" />
   </IconBase>
 );
 
@@ -1266,6 +1275,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     { id: 'business', label: 'Business Info', icon: IconStore },
     { id: 'orders', label: 'Orders', icon: IconOrders },
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
+    { id: 'payouts', label: 'Payouts', icon: IconWallet },
   ];
 
   if (loading) {
@@ -2425,6 +2435,15 @@ export default function Dashboard({ user, userProfile, onLogout }) {
                   {ordersError || 'Your orders will show here as soon as customers start buying.'}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'payouts' && (
+            <div className="content-card full-span">
+              <div className="card-header">
+                <h3>Seller Payouts</h3>
+              </div>
+              <SellerPayoutPanel user={user} storeInfo={storeInfo} />
             </div>
           )}
         </section>
