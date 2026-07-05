@@ -15,6 +15,13 @@ const CRAWLER_UA_PATTERN = /whatsapp|facebookexternalhit|facebot|twitterbot|slac
 // First path segments that are app routes, never store slugs — see App.jsx's route list.
 const RESERVED_PATHS = new Set(['login', 'signup', 'onboarding', 'dashboard', 'payment']);
 
+// Facebook's crawler validates og:image synchronously against declared dimensions; without
+// them it does a slower async fetch-and-measure pass that can fail the image silently even
+// though the rest of the tags parse fine. Fall back to these (Facebook's recommended
+// large-image-card size) when the product's own image dimensions weren't captured at upload.
+const DEFAULT_OG_IMAGE_WIDTH = 1200;
+const DEFAULT_OG_IMAGE_HEIGHT = 630;
+
 export const config = {
   matcher: ['/((?!assets/|favicon\\.svg|robots\\.txt|manifest\\.json).*)'],
 };
@@ -55,11 +62,13 @@ async function fetchPublicStore(storeSlug) {
   return decodeFirestoreFields(doc.fields);
 }
 
-function renderProductOgHtml({ title, description, image, pageUrl }) {
+function renderProductOgHtml({ title, description, image, imageWidth, imageHeight, pageUrl }) {
   const safeTitle = escapeHtml(title);
   const safeDescription = escapeHtml(description);
   const safeImage = image ? escapeHtml(image) : '';
   const safeUrl = escapeHtml(pageUrl);
+  const safeWidth = Number(imageWidth) > 0 ? Number(imageWidth) : DEFAULT_OG_IMAGE_WIDTH;
+  const safeHeight = Number(imageHeight) > 0 ? Number(imageHeight) : DEFAULT_OG_IMAGE_HEIGHT;
 
   return `<!doctype html>
 <html lang="en">
@@ -69,7 +78,9 @@ function renderProductOgHtml({ title, description, image, pageUrl }) {
 <meta property="og:type" content="product">
 <meta property="og:title" content="${safeTitle}">
 <meta property="og:description" content="${safeDescription}">
-${safeImage ? `<meta property="og:image" content="${safeImage}">` : ''}
+${safeImage ? `<meta property="og:image" content="${safeImage}">
+<meta property="og:image:width" content="${safeWidth}">
+<meta property="og:image:height" content="${safeHeight}">` : ''}
 <meta property="og:url" content="${safeUrl}">
 <meta name="twitter:card" content="${safeImage ? 'summary_large_image' : 'summary'}">
 <meta name="twitter:title" content="${safeTitle}">
@@ -120,11 +131,15 @@ export default async function middleware(request) {
       ? product.description
       : `Available now at ${store.businessName || 'this store'}. ${formatCurrency(product.price)}.`;
 
+    const hasProductImage = Boolean(product.imageUrl);
+
     return new Response(
       renderProductOgHtml({
         title,
         description,
         image: product.imageUrl || store.bannerUrl || '',
+        imageWidth: hasProductImage ? product.imageWidth : null,
+        imageHeight: hasProductImage ? product.imageHeight : null,
         pageUrl: url.toString(),
       }),
       { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }
