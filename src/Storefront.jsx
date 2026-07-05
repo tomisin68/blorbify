@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { getReadableTextColor, getStoreCopy, getStoreSocialLinks, getStoreTemplate, getTemplateTheme } from './storeTemplates';
@@ -34,6 +35,8 @@ export default function Storefront({ slug }) {
   const [activeCategory, setActiveCategory] = useState('All');
   const [wishlist, setWishlist] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const appliedInitialProductRef = useRef(false);
 
   const { toasts, notify, dismiss } = useToasts();
 
@@ -79,6 +82,45 @@ export default function Storefront({ slug }) {
       ? store.products.filter((product) => product?.name && product?.imageUrl)
       : []
   ), [store]);
+
+  // Auto-open the product a shared link points to, once the store has loaded. Only runs once —
+  // afterwards the URL is driven by the effect below, not the other way around.
+  useEffect(() => {
+    if (appliedInitialProductRef.current) return;
+    if (loading) return;
+    if (!store) return;
+
+    appliedInitialProductRef.current = true;
+    const productId = searchParams.get('product');
+    if (!productId) return;
+
+    const match = products.find((product) => productKey(product) === productId);
+    if (match) {
+      setSelectedProduct(match);
+    } else {
+      console.warn(`Storefront: product "${productId}" from the shared link was not found in this store's catalog.`);
+    }
+  }, [loading, store, products, searchParams]);
+
+  // Keep the URL in sync with the open product modal, using replace so opening/closing products
+  // doesn't clutter browser history.
+  useEffect(() => {
+    const productId = selectedProduct ? productKey(selectedProduct) : null;
+    const currentParam = searchParams.get('product');
+    if (productId === currentParam) return;
+
+    const nextParams = new URLSearchParams(searchParams);
+    if (productId) {
+      nextParams.set('product', productId);
+    } else {
+      nextParams.delete('product');
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [selectedProduct, searchParams, setSearchParams]);
+
+  const productShareUrl = selectedProduct
+    ? `${window.location.origin}/${store?.storeSlug || slug}?${new URLSearchParams({ product: productKey(selectedProduct) }).toString()}`
+    : '';
 
   const { cart, cartCount, cartSubtotal, addToCart, updateQuantity, removeItem, clearCart } = useCart(store?.storeSlug || slug, {
     onAdd: (product, quantity) => {
@@ -266,6 +308,7 @@ export default function Storefront({ slug }) {
     addToCart,
     selectedProduct,
     setSelectedProduct,
+    productShareUrl,
     cart,
     cartCount,
     cartSubtotal,

@@ -12,7 +12,7 @@ export default function SignatureTemplate(props) {
     store, theme, accentTextColor, copy, businessTypeLabel, visibleSocialLinks, footerText,
     filteredProducts, productCategories, activeCategory, setActiveCategory, searchTerm, setSearchTerm,
     featuredImage, secondaryImage, heroHeadline, heroSubtext, heroEyebrow, productsSubheading, products,
-    formatCurrency, wishlist, isWished, toggleWishlist, addToCart, selectedProduct, setSelectedProduct,
+    formatCurrency, wishlist, isWished, toggleWishlist, addToCart, selectedProduct, setSelectedProduct, productShareUrl,
     cart, cartCount, cartSubtotal, cartTotal, deliveryFee, freeShippingThreshold, updateQuantity, removeItem,
     cartOpen, setCartOpen, closeCart, mobileMenuOpen, setMobileMenuOpen,
     customer, updateCustomer, handleCheckout, submittingOrder, orderPlaced,
@@ -333,6 +333,7 @@ export default function SignatureTemplate(props) {
         onClose={() => setSelectedProduct(null)}
         onAddToCart={(quantity) => addToCart(selectedProduct, quantity)}
         onToggleWish={() => toggleWishlist(selectedProduct)}
+        shareUrl={productShareUrl}
       />
 
       <ToastStack toasts={toasts} onDismiss={dismiss} />
