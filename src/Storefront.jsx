@@ -30,7 +30,7 @@ export default function Storefront({ slug }) {
   const [store, setStore] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [customer, setCustomer] = useState({ name: '', email: '', phone: '', address: '', note: '' });
+  const [customer, setCustomer] = useState({ name: '', email: '', phone: '', whatsapp: '', location: '', address: '', note: '' });
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
@@ -261,6 +261,8 @@ export default function Storefront({ slug }) {
         customerName: name,
         customerEmail: email,
         customerPhone: phone,
+        customerWhatsapp: customer.whatsapp.trim(),
+        customerLocation: customer.location,
         customerAddress: address,
         customerNote: customer.note.trim(),
         items: orderItems,

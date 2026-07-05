@@ -161,7 +161,7 @@ function AppShell() {
         }
       />
 
-      {["/dashboard", "/dashboard/:tab"].map((path) => (
+      {["/dashboard", "/dashboard/:tab", "/dashboard/orders/:orderId"].map((path) => (
         <Route
           key={path}
           path={path}

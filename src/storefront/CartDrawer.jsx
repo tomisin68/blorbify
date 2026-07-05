@@ -1,4 +1,5 @@
 import { StoreIcon } from './icons';
+import { nigerianStates } from '../nigerianStates';
 
 export default function CartDrawer({
   open,
@@ -95,6 +96,13 @@ export default function CartDrawer({
                 <input value={customer.name} onChange={(event) => onCustomerChange('name', event.target.value)} placeholder="Your name" />
                 <input type="email" value={customer.email} onChange={(event) => onCustomerChange('email', event.target.value)} placeholder="Email (for your payment receipt)" />
                 <input value={customer.phone} onChange={(event) => onCustomerChange('phone', event.target.value)} placeholder="Phone number" />
+                <input type="tel" value={customer.whatsapp} onChange={(event) => onCustomerChange('whatsapp', event.target.value)} placeholder="WhatsApp number (so the seller can reach you)" />
+                <select value={customer.location} onChange={(event) => onCustomerChange('location', event.target.value)}>
+                  <option value="">Select your state</option>
+                  {nigerianStates.map((state) => (
+                    <option key={state} value={state}>{state}</option>
+                  ))}
+                </select>
                 <textarea value={customer.address} onChange={(event) => onCustomerChange('address', event.target.value)} placeholder="Delivery address" />
                 <textarea value={customer.note} onChange={(event) => onCustomerChange('note', event.target.value)} placeholder="Note for the seller (optional)" />
                 <button type="submit" className="store-cta block" disabled={submitting || !cart.length}>

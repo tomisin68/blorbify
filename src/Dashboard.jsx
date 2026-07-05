@@ -26,6 +26,7 @@ import {
   storeTemplates,
 } from './storeTemplates';
 import LivePreviewFrame from './storefront/LivePreviewFrame';
+import { nigerianStates } from './nigerianStates';
 
 const emptyStats = {
   revenue: 0,
@@ -186,67 +187,170 @@ const businessTypeOptions = [
   { value: 'others', label: 'Others' },
 ];
 
-const nigerianStates = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue',
-  'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu',
-  'FCT Abuja', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano', 'Katsina',
-  'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun',
-  'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
-  'Yobe', 'Zamfara',
+const ORDER_STATUSES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'shipped', label: 'Shipped' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'cancelled', label: 'Cancelled' },
 ];
 
+function formatOrderTimestamp(timestamp) {
+  if (!timestamp) return '';
+  const date = typeof timestamp.toDate === 'function' ? timestamp.toDate() : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-NG', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function OrderRow({ order }) {
-  const [expanded, setExpanded] = useState(false);
-  const items = Array.isArray(order.items) ? order.items : [];
+  const navigate = useNavigate();
+  const placedAt = formatOrderTimestamp(order.createdAt);
 
   return (
-    <div className={`order-row-wrap ${expanded ? 'is-expanded' : ''}`}>
-      <button type="button" className="order-row" onClick={() => setExpanded((current) => !current)}>
-        <div>
-          <strong>{order.customerName || order.customer?.name || 'Customer'}</strong>
-          <span>{order.id ? `#${order.id.slice(0, 8)}` : 'New order'}</span>
-        </div>
-        <div>
-          <strong>{formatCurrency(order.total || order.amount)}</strong>
-          <span className="status-pill">{order.status || 'pending'}</span>
-        </div>
+    <button type="button" className="order-row" onClick={() => navigate(`/dashboard/orders/${order.id}`)}>
+      <div>
+        <strong>{order.customerName || order.customer?.name || 'Customer'}</strong>
+        <span>{order.id ? `#${order.id.slice(0, 8)}` : 'New order'}{placedAt ? ` · ${placedAt}` : ''}</span>
+      </div>
+      <div>
+        <strong>{formatCurrency(order.total || order.amount)}</strong>
+        <span className="status-pill">{order.status || 'pending'}</span>
+      </div>
+    </button>
+  );
+}
+
+function OrderDetailPage({ orderId }) {
+  const navigate = useNavigate();
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, 'orders', orderId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setOrder(null);
+          setNotFound(true);
+        } else {
+          setOrder({ id: snapshot.id, ...snapshot.data() });
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Order detail load failed:', error);
+        setOrder(null);
+        setNotFound(true);
+        setLoading(false);
+      }
+    );
+    return unsubscribe;
+  }, [orderId]);
+
+  const updateStatus = async (nextStatus) => {
+    if (!order || nextStatus === order.status || updatingStatus) return;
+    setUpdatingStatus(true);
+    try {
+      await setDoc(doc(db, 'orders', orderId), { status: nextStatus, updatedAt: serverTimestamp() }, { merge: true });
+    } catch (error) {
+      console.error('Order status update failed:', error);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="empty-state">Loading order…</div>;
+  }
+
+  if (notFound || !order) {
+    return (
+      <div className="empty-state">
+        <strong>Order not found.</strong>
+        <br />
+        <button type="button" className="btn-link" onClick={() => navigate('/dashboard/orders')}>← Back to orders</button>
+      </div>
+    );
+  }
+
+  const items = Array.isArray(order.items) ? order.items : [];
+  const placedAt = formatOrderTimestamp(order.createdAt);
+
+  return (
+    <div className="order-detail">
+      <button type="button" className="order-detail-back" onClick={() => navigate('/dashboard/orders')}>
+        ← Back to orders
       </button>
-      {expanded && (
-        <div className="order-details">
-          {items.length > 0 ? (
-            <div className="order-items">
-              {items.map((item, index) => (
-                <div className="order-item" key={item.productId || index}>
-                  {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name || 'Product'} />
-                  ) : (
-                    <div className="order-item-noimg" />
-                  )}
-                  <div>
-                    <strong>{item.name || 'Product'}</strong>
-                    <span>{item.quantity || 1} x {formatCurrency(item.price)}</span>
-                  </div>
-                  <strong className="order-item-subtotal">
-                    {formatCurrency(item.subtotal ?? Number(item.price || 0) * Number(item.quantity || 1))}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="order-details-empty">No item details were recorded for this order.</p>
-          )}
-          <div className="order-summary">
-            <div><span>Subtotal</span><strong>{formatCurrency(order.subtotal)}</strong></div>
-            <div><span>Delivery fee</span><strong>{formatCurrency(order.deliveryFee)}</strong></div>
-            <div><span>Total</span><strong>{formatCurrency(order.total || order.amount)}</strong></div>
-          </div>
-          <div className="order-contact">
-            {order.customerPhone && <div><span>Phone</span><strong>{order.customerPhone}</strong></div>}
-            {order.customerAddress && <div><span>Delivery address</span><strong>{order.customerAddress}</strong></div>}
-            {order.customerNote && <div><span>Note</span><strong>{order.customerNote}</strong></div>}
-          </div>
+
+      <div className="order-detail-header">
+        <div>
+          <h3>{order.customerName || order.customer?.name || 'Customer'}</h3>
+          <span>#{order.id.slice(0, 8)}{placedAt ? ` · ${placedAt}` : ''}</span>
         </div>
+        <strong>{formatCurrency(order.total || order.amount)}</strong>
+      </div>
+
+      <div className="order-status-control">
+        <span>Status</span>
+        <div className="status-actions">
+          {ORDER_STATUSES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`status-btn ${(order.status || 'pending') === option.value ? 'active' : ''}`}
+              disabled={updatingStatus}
+              onClick={() => updateStatus(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {items.length > 0 ? (
+        <div className="order-items">
+          {items.map((item, index) => (
+            <div className="order-item" key={item.productId || index}>
+              {item.imageUrl ? (
+                <img src={item.imageUrl} alt={item.name || 'Product'} />
+              ) : (
+                <div className="order-item-noimg" />
+              )}
+              <div>
+                <strong>{item.name || 'Product'}</strong>
+                <span>{item.quantity || 1} x {formatCurrency(item.price)}</span>
+              </div>
+              <strong className="order-item-subtotal">
+                {formatCurrency(item.subtotal ?? Number(item.price || 0) * Number(item.quantity || 1))}
+              </strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="order-details-empty">No item details were recorded for this order.</p>
       )}
+
+      <div className="order-summary">
+        <div><span>Subtotal</span><strong>{formatCurrency(order.subtotal)}</strong></div>
+        <div><span>Delivery fee</span><strong>{formatCurrency(order.deliveryFee)}</strong></div>
+        <div><span>Total</span><strong>{formatCurrency(order.total || order.amount)}</strong></div>
+      </div>
+
+      <div className="order-contact">
+        {order.customerPhone && <div><span>Phone</span><strong>{order.customerPhone}</strong></div>}
+        {order.customerWhatsapp && <div><span>WhatsApp</span><strong>{order.customerWhatsapp}</strong></div>}
+        {order.customerLocation && <div><span>Location</span><strong>{order.customerLocation}</strong></div>}
+        {order.customerAddress && <div><span>Delivery address</span><strong>{order.customerAddress}</strong></div>}
+        {order.customerNote && <div><span>Note</span><strong>{order.customerNote}</strong></div>}
+      </div>
     </div>
   );
 }
@@ -1275,8 +1379,8 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved, compact = fals
 
 export default function Dashboard({ user, userProfile, onLogout }) {
   const navigate = useNavigate();
-  const { tab: tabParam } = useParams();
-  const activeTab = tabParam || 'overview';
+  const { tab: tabParam, orderId } = useParams();
+  const activeTab = orderId ? 'orders' : (tabParam || 'overview');
   const [profile, setProfile] = useState(userProfile || null);
   const [store, setStore] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -1291,7 +1395,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
 
     const userRef = doc(db, 'users', user.uid);
     const storeRef = doc(db, 'stores', user.uid);
-    const ordersQuery = query(collection(db, 'orders'), where('storeId', '==', user.uid), limit(8));
+    const ordersQuery = query(collection(db, 'orders'), where('storeId', '==', user.uid), limit(50));
 
     const unsubscribeUser = onSnapshot(
       userRef,
@@ -1940,25 +2044,21 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           line-height: 1.5;
         }
         .orders-list { display: grid; gap: 10px; }
-        .order-row-wrap {
-          border: 1px solid var(--paper-dim);
-          border-radius: 8px;
-          overflow: hidden;
-        }
-        .order-row-wrap.is-expanded { border-color: var(--line); }
         .order-row {
           display: flex;
           justify-content: space-between;
           gap: 12px;
-          border: 0;
-          border-radius: 0;
+          border: 1px solid var(--paper-dim);
+          border-radius: 8px;
           padding: 13px;
           width: 100%;
           background: transparent;
           font: inherit;
           text-align: inherit;
           cursor: pointer;
+          transition: border-color .15s ease, background .15s ease;
         }
+        .order-row:hover { border-color: var(--line); background: var(--paper-dim); }
         .order-row div {
           display: grid;
           gap: 4px;
@@ -2038,6 +2138,57 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .order-summary span,
         .order-contact span { color: var(--slate); }
         .order-contact strong { text-align: right; overflow-wrap: anywhere; }
+        .order-detail { display: grid; gap: 16px; }
+        .order-detail-back {
+          justify-self: start;
+          border: 0;
+          background: transparent;
+          color: var(--slate);
+          font: inherit;
+          font-weight: 700;
+          font-size: 13px;
+          padding: 0;
+          cursor: pointer;
+        }
+        .order-detail-back:hover { color: var(--ink); }
+        .order-detail-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          border-bottom: 1px dashed var(--line);
+          padding-bottom: 14px;
+        }
+        .order-detail-header h3 { margin: 0 0 4px; font-size: 18px; color: var(--ink); }
+        .order-detail-header span { font-size: 12.5px; color: var(--slate); }
+        .order-detail-header strong { font-size: 18px; color: var(--ink); white-space: nowrap; }
+        .order-status-control { display: grid; gap: 8px; }
+        .order-status-control > span { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--slate); }
+        .status-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .status-btn {
+          border: 1.5px solid var(--line);
+          border-radius: 999px;
+          background: #fff;
+          color: var(--ink);
+          padding: 7px 14px;
+          font: inherit;
+          font-size: 12.5px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .status-btn:hover { border-color: var(--ink); }
+        .status-btn.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+        .status-btn:disabled { opacity: .6; cursor: not-allowed; }
+        .btn-link {
+          border: 0;
+          background: transparent;
+          color: var(--ink);
+          font: inherit;
+          font-weight: 800;
+          text-decoration: underline;
+          padding: 0;
+          cursor: pointer;
+        }
         .empty-state {
           border: 1px dashed var(--line);
           border-radius: 8px;
@@ -2636,14 +2787,20 @@ export default function Dashboard({ user, userProfile, onLogout }) {
             </div>
           )}
 
-          {(activeTab === 'overview' || activeTab === 'orders') && (
+          {activeTab === 'orders' && orderId && (
+            <div className="content-card full-span">
+              <OrderDetailPage key={orderId} orderId={orderId} />
+            </div>
+          )}
+
+          {(activeTab === 'overview' || activeTab === 'orders') && !orderId && (
             <div className="content-card">
               <div className="card-header">
-                <h3>Recent Orders</h3>
+                <h3>{activeTab === 'orders' ? 'Orders' : 'Recent Orders'}</h3>
               </div>
               {orders.length > 0 ? (
                 <div className="orders-list">
-                  {orders.map((order) => (
+                  {(activeTab === 'orders' ? orders : orders.slice(0, 6)).map((order) => (
                     <OrderRow key={order.id} order={order} />
                   ))}
                 </div>
