@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { StoreIcon } from './icons';
 import { getProductImages } from '../productImages';
 
-export default function ProductDetail({ product, categoryLabel, deliveryFee, isWished, addLabel, formatCurrency, onClose, onAddToCart, onToggleWish }) {
+export default function ProductDetail({ product, categoryLabel, deliveryFee, isWished, addLabel, formatCurrency, onClose, onAddToCart, onToggleWish, shareUrl }) {
   const [quantity, setQuantity] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const [trackedKey, setTrackedKey] = useState(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const productKey = product ? (product.id || product.imageUrl) : null;
   if (productKey !== trackedKey) {
     setTrackedKey(productKey);
     setActiveIndex(0);
     setQuantity(1);
+    setLinkCopied(false);
   }
 
   if (!product) return null;
@@ -20,6 +22,29 @@ export default function ProductDetail({ product, categoryLabel, deliveryFee, isW
   const activeImage = images[activeIndex] || images[0];
   const stock = Number(product.stock || 0);
   const outOfStock = stock <= 0;
+
+  const handleCopyLink = async () => {
+    if (!shareUrl) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = shareUrl;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (error) {
+      console.error('Copy product link failed:', error);
+    }
+  };
 
   return (
     <div className="pdetail-modal" role="dialog" aria-modal="true" aria-label={product.name}>
@@ -91,6 +116,10 @@ export default function ProductDetail({ product, categoryLabel, deliveryFee, isW
             <button type="button" className="store-cta secondary" onClick={onToggleWish}>
               <StoreIcon name="heart" size={16} />
               {isWished ? 'Saved' : 'Save for later'}
+            </button>
+            <button type="button" className="store-cta secondary" onClick={handleCopyLink} disabled={!shareUrl}>
+              <StoreIcon name={linkCopied ? 'check' : 'link'} size={16} />
+              {linkCopied ? 'Link copied!' : 'Copy product link'}
             </button>
           </div>
         </div>
