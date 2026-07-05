@@ -1,6 +1,39 @@
 const CLOUDINARY_CLOUD_NAME = 'dwshyzftx';
 const CLOUDINARY_UPLOAD_PRESET = 'blorbmart';
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
+export const MIN_PRODUCT_IMAGE_DIMENSION = 400;
+
+function getImageDimensions(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Could not read image dimensions.'));
+    };
+    img.src = objectUrl;
+  });
+}
+
+// Advisory only — small photos still get accepted (they display fine in the storefront itself),
+// but they look blurry/cropped once Cloudinary pads them up for WhatsApp/Facebook/Twitter link
+// previews. Surfacing this at upload time is cheaper than chasing it down later per-seller.
+export async function checkProductImageDimensions(file) {
+  try {
+    const { width, height } = await getImageDimensions(file);
+    if (width < MIN_PRODUCT_IMAGE_DIMENSION || height < MIN_PRODUCT_IMAGE_DIMENSION) {
+      return `This photo is ${width}×${height}px, below the recommended ${MIN_PRODUCT_IMAGE_DIMENSION}×${MIN_PRODUCT_IMAGE_DIMENSION}px — it'll be added, but may look blurry or padded when shared as a link preview on WhatsApp, Facebook, or Twitter.`;
+    }
+    return '';
+  } catch {
+    // Don't block the upload if we can't read dimensions for some reason (unsupported format, etc).
+    return '';
+  }
+}
 
 export function validateImage(file, label = 'Image') {
   if (!file) {

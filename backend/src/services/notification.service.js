@@ -1,5 +1,6 @@
 import { getMailerTransport, isMailerConfigured, isResendConfigured, sendResendEmail } from '../config/mailer.js';
 import { adminDb, fieldValue } from '../config/firebaseAdmin.js';
+import { escapeHtml, getDashboardUrl, renderEmailCodePill, renderEmailLayout } from '../utils/emailTemplate.js';
 
 export async function queueNotification(notification) {
   const payload = {
@@ -57,14 +58,18 @@ export async function sendEmail({ to, subject, html, text, data = {} }) {
 export async function queueWelcomeNotification({ user, subscription }) {
   const recipientName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'there';
   const subject = 'Welcome to Blorbify';
-  const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#192328;">
-      <h2 style="margin:0 0 12px;">Welcome to Blorbify</h2>
-      <p style="margin:0 0 12px;">Hi ${recipientName}, your ${subscription.planName} plan is now active.</p>
-      <p style="margin:0 0 12px;">You can now continue setting up your store, publish products, and start selling online.</p>
-    </div>
-  `;
-  const text = `Welcome to Blorbify\n\nHi ${recipientName}, your ${subscription.planName} plan is now active.\n\nYou can now continue setting up your store and start selling online.`;
+  const html = renderEmailLayout({
+    preheader: `Your ${subscription.planName} plan is now active.`,
+    heading: 'Welcome to Blorbify 🎉',
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Hi ${escapeHtml(recipientName)},</p>
+      <p style="margin:0 0 14px;">Your ${renderEmailCodePill(escapeHtml(subscription.planName))} plan is now active.</p>
+      <p style="margin:0;">You can now continue setting up your store, publish products, and start selling online.</p>
+    `,
+    ctaLabel: 'Go to your dashboard',
+    ctaUrl: getDashboardUrl(),
+  });
+  const text = `Welcome to Blorbify\n\nHi ${recipientName}, your ${subscription.planName} plan is now active.\n\nYou can now continue setting up your store and start selling online.\n\n${getDashboardUrl()}`;
 
   const notification = await queueNotification({
     type: 'welcome',
@@ -85,6 +90,59 @@ export async function queueWelcomeNotification({ user, subscription }) {
   }
 
   return notification;
+}
+
+const ORDER_STATUS_EMAIL_COPY = {
+  pending: {
+    subject: (storeName) => `Your order from ${storeName} is pending`,
+    message: 'Your order has been received and is pending confirmation.',
+  },
+  processing: {
+    subject: (storeName) => `Your order from ${storeName} is being processed`,
+    message: 'Good news — your order is now being processed and will be shipped soon.',
+  },
+  shipped: {
+    subject: (storeName) => `Your order from ${storeName} has shipped`,
+    message: 'Your order is on its way!',
+  },
+  delivered: {
+    subject: (storeName) => `Your order from ${storeName} has been delivered`,
+    message: 'Your order has been marked as delivered. We hope you love it!',
+  },
+  cancelled: {
+    subject: (storeName) => `Your order from ${storeName} was cancelled`,
+    message: 'Your order has been cancelled. If this is unexpected, please reach out to the seller.',
+  },
+};
+
+export async function sendOrderStatusEmail({ order, status, storeName }) {
+  const copy = ORDER_STATUS_EMAIL_COPY[status];
+  if (!copy || !order.customerEmail) {
+    return { sent: false, skipped: true };
+  }
+
+  const resolvedStoreName = storeName || order.storeName || 'your seller';
+  const subject = copy.subject(resolvedStoreName);
+  const recipientName = order.customerName || 'there';
+  const html = renderEmailLayout({
+    preheader: copy.message,
+    heading: subject,
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Hi ${escapeHtml(recipientName)},</p>
+      <p style="margin:0 0 14px;">${copy.message}</p>
+      <p style="margin:0;">Order reference:<br />${renderEmailCodePill(escapeHtml(order.id || ''))}</p>
+    `,
+    footerNote: `Sent because your order status changed on ${escapeHtml(resolvedStoreName)}.`,
+  });
+  const text = `${subject}\n\nHi ${recipientName},\n\n${copy.message}\n\nOrder reference: ${order.id || ''}`;
+
+  return sendEmail({
+    to: order.customerEmail,
+    subject,
+    html,
+    text,
+    data: { orderId: order.id || null, status },
+  });
 }
 
 export async function queueOrderNotification({ store, order }) {

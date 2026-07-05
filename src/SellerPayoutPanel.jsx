@@ -12,10 +12,6 @@ function buildForm(profile, fallbackBusinessName, fallbackEmail) {
     businessName: profile?.businessName || fallbackBusinessName || '',
     bankCode: profile?.bankCode || '',
     accountNumber: profile?.accountNumber || '',
-    percentageCharge:
-      profile?.percentageCharge !== undefined && profile?.percentageCharge !== null
-        ? String(profile.percentageCharge)
-        : '10',
     description: profile?.description || '',
     primaryContactEmail: profile?.primaryContactEmail || fallbackEmail || '',
   };
@@ -113,7 +109,6 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
     const accountNumber = form.accountNumber.trim();
     const primaryContactEmail = form.primaryContactEmail.trim();
     const description = form.description.trim();
-    const percentageCharge = Number(form.percentageCharge);
 
     if (!businessName) {
       setError('Enter your business name.');
@@ -130,11 +125,6 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
       return;
     }
 
-    if (!Number.isFinite(percentageCharge) || percentageCharge < 0 || percentageCharge > 100) {
-      setError('Platform fee must be a percentage between 0 and 100.');
-      return;
-    }
-
     setSaving(true);
     try {
       const hadExistingProfile = Boolean(profile?.subaccountCode);
@@ -145,7 +135,6 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
           businessName,
           bankCode,
           accountNumber,
-          percentageCharge,
           description,
           primaryContactEmail,
         },
@@ -373,7 +362,7 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
 
       <div className="seller-panel-note">
         This uses the same Paystack business account, then creates a separate subaccount for this seller.
-        When a buyer pays, the backend recognizes the payment by metadata and routes the split correctly.
+        When a buyer pays, the payment settles straight to your bank account — you keep 100% of the sale.
       </div>
 
       <div className="seller-panel-layout">
@@ -421,15 +410,6 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
               />
             </label>
             <label className="seller-field">
-              <span>Platform fee (%)</span>
-              <input
-                inputMode="decimal"
-                value={form.percentageCharge}
-                onChange={(event) => updateField('percentageCharge', event.target.value)}
-                placeholder="10"
-              />
-            </label>
-            <label className="seller-field">
               <span>Contact email</span>
               <input
                 type="email"
@@ -449,7 +429,7 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
           </div>
 
           <p className="seller-help">
-            Paystack treats this as the main-account percentage. If you enter 10, the platform keeps 10% and the seller receives the remainder.
+            You keep 100% of every sale — Blorbify does not deduct a commission from your payments.
           </p>
 
           {error && <div className="seller-alert error">{error}</div>}
@@ -510,8 +490,8 @@ export default function SellerPayoutPanel({ user, storeInfo }) {
                 <strong>{profile?.accountName || 'Not set'}</strong>
               </div>
               <div className="seller-summary-row">
-                <span>Platform fee</span>
-                <strong>{profile?.percentageCharge !== undefined ? `${profile.percentageCharge}%` : '10%'}</strong>
+                <span>You keep</span>
+                <strong>100% of every sale</strong>
               </div>
               <div className="seller-summary-row">
                 <span>Updated</span>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, limit, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { useNavigate, useParams } from 'react-router-dom';
+import { arrayUnion, collection, doc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import {
+  checkProductImageDimensions,
   uploadProductImage,
   uploadStoreBanner,
   uploadStoreLogo,
@@ -25,6 +27,8 @@ import {
   storeTemplates,
 } from './storeTemplates';
 import LivePreviewFrame from './storefront/LivePreviewFrame';
+import { nigerianStates } from './nigerianStates';
+import { notifyOrderStatusUpdate } from './backendApi';
 
 const emptyStats = {
   revenue: 0,
@@ -192,25 +196,240 @@ const businessTypeOptions = [
   { value: 'others', label: 'Others' },
 ];
 
-const nigerianStates = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue',
-  'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu',
-  'FCT Abuja', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano', 'Katsina',
-  'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun',
-  'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
-  'Yobe', 'Zamfara',
+const ORDER_FLOW_STATUSES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'shipped', label: 'Shipped' },
+  { value: 'delivered', label: 'Delivered' },
 ];
 
+function getStatusHistoryAt(order, status) {
+  const entry = (order.statusHistory || []).find((item) => item?.status === status);
+  return entry?.at || (status === 'pending' ? order.createdAt : null);
+}
+
+function formatOrderTimestamp(timestamp) {
+  if (!timestamp) return '';
+  const date = typeof timestamp.toDate === 'function' ? timestamp.toDate() : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-NG', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function OrderRow({ order }) {
+  const navigate = useNavigate();
+  const placedAt = formatOrderTimestamp(order.createdAt);
+
   return (
-    <div className="order-row">
+    <button type="button" className="order-row" onClick={() => navigate(`/dashboard/orders/${order.id}`)}>
       <div>
         <strong>{order.customerName || order.customer?.name || 'Customer'}</strong>
-        <span>{order.id ? `#${order.id.slice(0, 8)}` : 'New order'}</span>
+        <span>{order.id ? `#${order.id.slice(0, 8)}` : 'New order'}{placedAt ? ` · ${placedAt}` : ''}</span>
       </div>
       <div>
         <strong>{formatCurrency(order.total || order.amount)}</strong>
         <span className="status-pill">{order.status || 'pending'}</span>
+      </div>
+    </button>
+  );
+}
+
+function OrderDetailPage({ orderId }) {
+  const navigate = useNavigate();
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, 'orders', orderId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setOrder(null);
+          setNotFound(true);
+        } else {
+          setOrder({ id: snapshot.id, ...snapshot.data() });
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Order detail load failed:', error);
+        setOrder(null);
+        setNotFound(true);
+        setLoading(false);
+      }
+    );
+    return unsubscribe;
+  }, [orderId]);
+
+  const updateStatus = async (nextStatus) => {
+    if (!order || nextStatus === order.status || updatingStatus) return;
+    setUpdatingStatus(true);
+    try {
+      await setDoc(
+        doc(db, 'orders', orderId),
+        {
+          status: nextStatus,
+          statusHistory: arrayUnion({ status: nextStatus, at: new Date().toISOString() }),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (order.customerEmail) {
+        notifyOrderStatusUpdate({ orderId, status: nextStatus }).catch((error) => {
+          console.error('Order status email failed:', error);
+        });
+      }
+    } catch (error) {
+      console.error('Order status update failed:', error);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="empty-state">Loading order…</div>;
+  }
+
+  if (notFound || !order) {
+    return (
+      <div className="empty-state">
+        <strong>Order not found.</strong>
+        <br />
+        <button type="button" className="btn-link" onClick={() => navigate('/dashboard/orders')}>← Back to orders</button>
+      </div>
+    );
+  }
+
+  const items = Array.isArray(order.items) ? order.items : [];
+  const placedAt = formatOrderTimestamp(order.createdAt);
+  const currentStatus = order.status || 'pending';
+  const isCancelled = currentStatus === 'cancelled';
+  const isDelivered = currentStatus === 'delivered';
+  const currentIndex = ORDER_FLOW_STATUSES.findIndex((step) => step.value === currentStatus);
+  const nextStep = !isCancelled ? ORDER_FLOW_STATUSES[currentIndex + 1] : null;
+
+  const confirmAndUpdate = (status, confirmMessage) => {
+    if (updatingStatus) return;
+    if (window.confirm(confirmMessage)) {
+      updateStatus(status);
+    }
+  };
+
+  return (
+    <div className="order-detail">
+      <button type="button" className="order-detail-back" onClick={() => navigate('/dashboard/orders')}>
+        ← Back to orders
+      </button>
+
+      <div className="order-detail-header">
+        <div>
+          <h3>{order.customerName || order.customer?.name || 'Customer'}</h3>
+          <span>#{order.id.slice(0, 8)}{placedAt ? ` · ${placedAt}` : ''}</span>
+        </div>
+        <strong>{formatCurrency(order.total || order.amount)}</strong>
+      </div>
+
+      <div className="order-timeline">
+        {isCancelled && <div className="order-cancelled-banner">This order was cancelled.</div>}
+
+        <div className={`timeline ${isCancelled ? 'is-cancelled' : ''}`} aria-hidden="true">
+          {ORDER_FLOW_STATUSES.map((step, index) => {
+            const reached = !isCancelled && index <= currentIndex;
+            const isCurrent = !isCancelled && index === currentIndex;
+            const at = formatOrderTimestamp(getStatusHistoryAt(order, step.value));
+            return (
+              <div
+                key={step.value}
+                className={`timeline-step ${reached ? 'reached' : ''} ${isCurrent ? 'current' : ''}`}
+              >
+                <span className="timeline-dot">{reached && !isCurrent ? '✓' : index + 1}</span>
+                <span className="timeline-label">{step.label}</span>
+                <span className="timeline-time">{at || '—'}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {isDelivered && !isCancelled && (
+          <p className="order-timeline-complete">✓ This order is complete.</p>
+        )}
+
+        {nextStep && (
+          <button
+            type="button"
+            className="order-primary-action"
+            disabled={updatingStatus}
+            onClick={() => confirmAndUpdate(
+              nextStep.value,
+              `Mark this order as "${nextStep.label}"? The buyer will get an email update.`
+            )}
+          >
+            {updatingStatus ? (
+              <>
+                <span className="btn-spinner" />
+                Updating…
+              </>
+            ) : (
+              `Mark as ${nextStep.label} →`
+            )}
+          </button>
+        )}
+
+        {!isCancelled && !isDelivered && (
+          <button
+            type="button"
+            className="btn-link btn-link-danger"
+            disabled={updatingStatus}
+            onClick={() => confirmAndUpdate('cancelled', 'Cancel this order? The buyer will be notified by email.')}
+          >
+            Cancel this order
+          </button>
+        )}
+      </div>
+
+      {items.length > 0 ? (
+        <div className="order-items">
+          {items.map((item, index) => (
+            <div className="order-item" key={item.productId || index}>
+              {item.imageUrl ? (
+                <img src={item.imageUrl} alt={item.name || 'Product'} />
+              ) : (
+                <div className="order-item-noimg" />
+              )}
+              <div>
+                <strong>{item.name || 'Product'}</strong>
+                <span>{item.quantity || 1} x {formatCurrency(item.price)}</span>
+              </div>
+              <strong className="order-item-subtotal">
+                {formatCurrency(item.subtotal ?? Number(item.price || 0) * Number(item.quantity || 1))}
+              </strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="order-details-empty">No item details were recorded for this order.</p>
+      )}
+
+      <div className="order-summary">
+        <div><span>Subtotal</span><strong>{formatCurrency(order.subtotal)}</strong></div>
+        <div><span>Delivery fee</span><strong>{formatCurrency(order.deliveryFee)}</strong></div>
+        <div><span>Total</span><strong>{formatCurrency(order.total || order.amount)}</strong></div>
+      </div>
+
+      <div className="order-contact">
+        {order.customerPhone && <div><span>Phone</span><strong>{order.customerPhone}</strong></div>}
+        {order.customerWhatsapp && <div><span>WhatsApp</span><strong>{order.customerWhatsapp}</strong></div>}
+        {order.customerLocation && <div><span>Location</span><strong>{order.customerLocation}</strong></div>}
+        {order.customerAddress && <div><span>Delivery address</span><strong>{order.customerAddress}</strong></div>}
+        {order.customerNote && <div><span>Note</span><strong>{order.customerNote}</strong></div>}
       </div>
     </div>
   );
@@ -256,6 +475,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
   const [deletingId, setDeletingId] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [warning, setWarning] = useState('');
 
   useEffect(() => {
     return () => {
@@ -272,7 +492,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
     setSuccess('');
   };
 
-  const handleImagesChange = (event) => {
+  const handleImagesChange = async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
     if (!files.length) return;
@@ -285,6 +505,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
 
     const accepted = [];
     let validationError = '';
+    const dimensionWarnings = [];
     for (const file of files.slice(0, room)) {
       const fileError = validateProductImage(file);
       if (fileError) {
@@ -292,11 +513,15 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
         continue;
       }
       accepted.push({ uid: nextImageItemId(), kind: 'new', file, previewUrl: URL.createObjectURL(file) });
+
+      const dimensionWarning = await checkProductImageDimensions(file);
+      if (dimensionWarning) dimensionWarnings.push(dimensionWarning);
     }
 
     if (accepted.length) {
       setImageItems((current) => [...current, ...accepted]);
     }
+    setWarning(dimensionWarnings[0] || '');
     if (files.length > room) {
       setError(`You can add up to ${MAX_PRODUCT_IMAGES} photos per product.`);
     } else if (validationError) {
@@ -325,6 +550,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
     setImageItems([]);
     setEditingKey('');
     setUploadProgress(0);
+    setWarning('');
   };
 
   const saveProducts = async (nextProducts) => {
@@ -466,6 +692,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
     setUploadProgress(0);
     setError('');
     setSuccess('');
+    setWarning('');
     setForm({
       name: product.name || '',
       price: product.price ?? '',
@@ -558,6 +785,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
             </div>
           )}
 
+          {warning && <div className="form-alert warning">{warning}</div>}
           {error && <div className="form-alert error">{error}</div>}
           {success && <div className="form-alert success">{success}</div>}
 
@@ -827,7 +1055,8 @@ const copyFieldRows = [
   { key: 'footerText', label: 'Footer text', placeholder: 'Made in Lagos. Delivered nationwide.' },
 ];
 
-function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
+function AppearanceEditor({ userId, storeInfo, onAppearanceSaved, compact = false }) {
+  const navigate = useNavigate();
   const [selectedTemplate, setSelectedTemplate] = useState(storeInfo.template || 'signature');
   const [themeColors, setThemeColors] = useState(() => getTemplateTheme(storeInfo.template || 'signature', storeInfo));
   const [copy, setCopy] = useState(() => getStoreCopy(storeInfo));
@@ -843,6 +1072,7 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(true);
 
   useEffect(() => {
     return () => {
@@ -1027,8 +1257,40 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
     }
   };
 
+  if (compact) {
+    const activeTemplate = storeTemplates.find((item) => item.id === (storeInfo.template || 'signature')) || storeTemplates[0];
+    const currentTheme = getTemplateTheme(storeInfo.template || 'signature', storeInfo);
+
+    return (
+      <div className="business-info-view">
+        <div className="appearance-summary-row">
+          <span
+            className={`template-swatch preview-${activeTemplate.id}`}
+            style={{ '--preview-accent': currentTheme.primaryColor, '--preview-ink': currentTheme.textColor, '--preview-surface': currentTheme.backgroundColor }}
+          >
+            <i />
+            <b />
+            <em />
+          </span>
+          <div>
+            <strong>{activeTemplate.name} template</strong>
+            <p>{activeTemplate.description}</p>
+          </div>
+        </div>
+        <div className="detail-list">
+          <DetailRow label="Accent color" value={currentTheme.primaryColor} />
+          <DetailRow label="Delivery fee" value={formatCurrency(storeInfo.deliveryFee)} />
+        </div>
+        <button type="button" className="secondary-action" onClick={() => navigate('/dashboard/appearance')}>
+          <IconEdit size={16} />
+          Edit appearance
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="appearance-editor">
+    <div className={`appearance-editor ${previewOpen ? '' : 'preview-collapsed'}`}>
       <div className="appearance-controls">
         <div>
           <span className="control-label">Design</span>
@@ -1178,22 +1440,33 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
       </div>
 
       <div className="appearance-preview-col">
-        <span className="control-label">Live preview</span>
-        <LivePreviewFrame store={livePreviewStore} />
-        <p className="preview-hint">This is your actual storefront design, scaled down — exactly what buyers will see at {storeInfo.storeSlug ? getStoreUrl(storeInfo.storeSlug) : 'your store URL'}.</p>
+        <div className="preview-col-header">
+          <span className="control-label">Live preview</span>
+          <button type="button" className="preview-toggle" onClick={() => setPreviewOpen((current) => !current)}>
+            {previewOpen ? 'Hide preview' : 'Show preview'}
+          </button>
+        </div>
+        {previewOpen && (
+          <>
+            <LivePreviewFrame store={livePreviewStore} />
+            <p className="preview-hint">This is your actual storefront design, scaled down — exactly what buyers will see at {storeInfo.storeSlug ? getStoreUrl(storeInfo.storeSlug) : 'your store URL'}.</p>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 export default function Dashboard({ user, userProfile, onLogout }) {
+  const navigate = useNavigate();
+  const { tab: tabParam, orderId } = useParams();
+  const activeTab = orderId ? 'orders' : (tabParam || 'overview');
   const [profile, setProfile] = useState(userProfile || null);
   const [store, setStore] = useState(null);
   const [orders, setOrders] = useState([]);
   const [analyticsOrders, setAnalyticsOrders] = useState([]);
   const [loading, setLoading] = useState(Boolean(user?.uid));
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
   const [ordersError, setOrdersError] = useState('');
 
   useEffect(() => {
@@ -1203,7 +1476,12 @@ export default function Dashboard({ user, userProfile, onLogout }) {
 
     const userRef = doc(db, 'users', user.uid);
     const storeRef = doc(db, 'stores', user.uid);
-    const ordersQuery = query(collection(db, 'orders'), where('storeId', '==', user.uid), limit(8));
+    const ordersQuery = query(
+      collection(db, 'orders'),
+      where('storeId', '==', user.uid),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
     const analyticsOrdersQuery = query(collection(db, 'orders'), where('storeId', '==', user.uid), limit(500));
 
     const unsubscribeUser = onSnapshot(
@@ -1638,6 +1916,9 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           gap: 18px;
           align-items: start;
         }
+        .appearance-editor.preview-collapsed {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
         .appearance-controls {
           display: grid;
           gap: 16px;
@@ -1872,6 +2153,27 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           top: 16px;
           display: grid;
           gap: 10px;
+          align-self: start;
+        }
+        .preview-col-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .preview-toggle {
+          border: 1px solid var(--line);
+          background: #fff;
+          color: var(--ink);
+          border-radius: 999px;
+          padding: 5px 12px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .preview-toggle:hover {
+          border-color: var(--slate);
         }
         .preview-hint {
           margin: 0;
@@ -1887,7 +2189,14 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           border: 1px solid var(--paper-dim);
           border-radius: 8px;
           padding: 13px;
+          width: 100%;
+          background: transparent;
+          font: inherit;
+          text-align: inherit;
+          cursor: pointer;
+          transition: border-color .15s ease, background .15s ease;
         }
+        .order-row:hover { border-color: var(--line); background: var(--paper-dim); }
         .order-row div {
           display: grid;
           gap: 4px;
@@ -1914,6 +2223,174 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           text-transform: uppercase;
           letter-spacing: .05em;
         }
+        .order-details {
+          padding: 13px;
+          border-top: 1px solid var(--paper-dim);
+          background: var(--paper-dim);
+          display: grid;
+          gap: 12px;
+        }
+        .order-items { display: grid; gap: 8px; }
+        .order-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: #fff;
+          border: 1px solid var(--paper-dim);
+          border-radius: 8px;
+          padding: 8px 10px;
+        }
+        .order-item img,
+        .order-item-noimg {
+          width: 36px;
+          height: 36px;
+          border-radius: 6px;
+          object-fit: cover;
+          background: var(--paper-dim);
+          flex-shrink: 0;
+        }
+        .order-item > div {
+          display: grid;
+          gap: 2px;
+          flex: 1;
+          min-width: 0;
+        }
+        .order-item strong { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
+        .order-item span { font-size: 12px; color: var(--slate); }
+        .order-item-subtotal { white-space: nowrap; font-size: 13.5px; }
+        .order-details-empty { margin: 0; font-size: 12.5px; color: var(--slate); }
+        .order-summary,
+        .order-contact {
+          display: grid;
+          gap: 4px;
+          font-size: 13px;
+          border-top: 1px dashed var(--line);
+          padding-top: 10px;
+        }
+        .order-summary div,
+        .order-contact div {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .order-summary span,
+        .order-contact span { color: var(--slate); }
+        .order-contact strong { text-align: right; overflow-wrap: anywhere; }
+        .order-detail { display: grid; gap: 16px; }
+        .order-detail-back {
+          justify-self: start;
+          border: 0;
+          background: transparent;
+          color: var(--slate);
+          font: inherit;
+          font-weight: 700;
+          font-size: 13px;
+          padding: 0;
+          cursor: pointer;
+        }
+        .order-detail-back:hover { color: var(--ink); }
+        .order-detail-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          border-bottom: 1px dashed var(--line);
+          padding-bottom: 14px;
+        }
+        .order-detail-header h3 { margin: 0 0 4px; font-size: 18px; color: var(--ink); }
+        .order-detail-header span { font-size: 12.5px; color: var(--slate); }
+        .order-detail-header strong { font-size: 18px; color: var(--ink); white-space: nowrap; }
+        .order-timeline { display: grid; gap: 12px; padding: 4px 0 14px; border-bottom: 1px dashed var(--line); }
+        .order-cancelled-banner {
+          border-radius: 8px;
+          background: rgba(220,38,38,.1);
+          color: #b91c1c;
+          border: 1px solid rgba(220,38,38,.25);
+          padding: 9px 12px;
+          font-size: 13px;
+          font-weight: 800;
+        }
+        .timeline { display: flex; align-items: flex-start; }
+        .timeline.is-cancelled { opacity: .45; }
+        .timeline-step {
+          flex: 1;
+          position: relative;
+          display: grid;
+          justify-items: center;
+          gap: 4px;
+          padding: 0 4px 0;
+        }
+        .timeline-step::before {
+          content: '';
+          position: absolute;
+          top: 13px;
+          left: -50%;
+          width: 100%;
+          height: 2px;
+          background: var(--paper-dim);
+          z-index: 0;
+        }
+        .timeline-step:first-child::before { display: none; }
+        .timeline-step.reached::before { background: var(--ink); }
+        .timeline-dot {
+          position: relative;
+          z-index: 1;
+          width: 27px;
+          height: 27px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          border: 2px solid var(--line);
+          background: #fff;
+          color: var(--slate);
+          font-size: 12px;
+          font-weight: 900;
+        }
+        .timeline-step.reached .timeline-dot { border-color: var(--ink); background: var(--ink); color: #fff; }
+        .timeline-step.current .timeline-dot { box-shadow: 0 0 0 3px rgba(175,255,0,.35); }
+        .timeline-label { font-size: 12.5px; font-weight: 800; color: var(--ink); }
+        .timeline-step:not(.reached) .timeline-label { color: var(--slate); }
+        .timeline-time { font-size: 11px; color: var(--slate); }
+        .btn-link {
+          justify-self: start;
+          border: 0;
+          background: transparent;
+          color: var(--ink);
+          font: inherit;
+          font-weight: 800;
+          text-decoration: underline;
+          padding: 0;
+          cursor: pointer;
+        }
+        .btn-link-danger { color: #b91c1c; }
+        .btn-link:disabled { opacity: .6; cursor: not-allowed; }
+        .order-timeline-complete { margin: 0; font-size: 13px; font-weight: 800; color: var(--ink); }
+        .order-primary-action {
+          justify-self: start;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border: 0;
+          border-radius: 999px;
+          background: var(--ink);
+          color: #fff;
+          padding: 11px 18px;
+          font: inherit;
+          font-size: 13.5px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+        .order-primary-action:hover { opacity: .92; }
+        .order-primary-action:disabled { opacity: .7; cursor: not-allowed; }
+        .btn-spinner {
+          width: 14px;
+          height: 14px;
+          border-radius: 999px;
+          border: 2px solid rgba(255,255,255,.35);
+          border-top-color: #fff;
+          animation: orderBtnSpin .7s linear infinite;
+        }
+        @keyframes orderBtnSpin { to { transform: rotate(360deg); } }
         .empty-state {
           border: 1px dashed var(--line);
           border-radius: 8px;
@@ -2006,6 +2483,26 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .business-info-form {
           display: grid;
           gap: 14px;
+        }
+        .appearance-summary-row {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .appearance-summary-row .template-swatch {
+          flex-shrink: 0;
+          width: 64px;
+          height: 64px;
+        }
+        .appearance-summary-row strong {
+          display: block;
+          font-size: 15px;
+        }
+        .appearance-summary-row p {
+          margin: 4px 0 0;
+          color: var(--slate);
+          font-size: 13px;
+          line-height: 1.5;
         }
         .form-actions {
           display: flex;
@@ -2218,6 +2715,11 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           color: #3d5900;
           border: 1px solid rgba(175,255,0,.3);
         }
+        .form-alert.warning {
+          background: rgba(255,184,0,.12);
+          color: #8a5a00;
+          border: 1px solid rgba(255,184,0,.32);
+        }
         .product-list-card {
           min-width: 0;
         }
@@ -2319,8 +2821,10 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .content-grid { grid-template-columns: 1fr; }
           .product-layout,
-          .appearance-editor { grid-template-columns: 1fr; }
+          .appearance-editor,
+          .appearance-editor.preview-collapsed { grid-template-columns: 1fr; }
           .media-grid { grid-template-columns: 1fr; }
+          .appearance-preview-col { position: static; top: auto; }
         }
         @media (max-width: 780px) {
           .dashboard-sidebar { transform: translateX(-100%); }
@@ -2366,7 +2870,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
               type="button"
               className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => {
-                setActiveTab(tab.id);
+                navigate(tab.id === 'overview' ? '/dashboard' : `/dashboard/${tab.id}`);
                 setSidebarOpen(false);
               }}
             >
@@ -2402,31 +2906,35 @@ export default function Dashboard({ user, userProfile, onLogout }) {
             {sidebarOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
           </button>
           <div className="headline">
-            <h1>Dashboard</h1>
-            <p>Welcome back, {displayName}. Your store setup is synced from Firestore.</p>
+            <h1>{tabs.find((tab) => tab.id === activeTab)?.label || 'Dashboard'}</h1>
+            {activeTab === 'overview' && <p>Welcome back, {displayName}. Your store setup is synced from Firestore.</p>}
           </div>
           <a className="store-link" href={storeUrl} target="_blank" rel="noreferrer">
             {storeUrl}
           </a>
         </header>
 
-        <section className="hero-panel">
-          <div>
-            <h2>{businessName}</h2>
-            <p>
-              {storeInfo.description ||
-                'Your store profile is ready. Add products whenever you are prepared to start taking orders.'}
-            </p>
-          </div>
-          <div className="hero-badge">Onboarded</div>
-        </section>
+        {activeTab === 'overview' && (
+          <>
+            <section className="hero-panel">
+              <div>
+                <h2>{businessName}</h2>
+                <p>
+                  {storeInfo.description ||
+                    'Your store profile is ready. Add products whenever you are prepared to start taking orders.'}
+                </p>
+              </div>
+              <div className="hero-badge">Onboarded</div>
+            </section>
 
-        <section className="stats-grid" aria-label="Store stats">
-          <StatCard label="Revenue" value={formatCurrency(stats.revenue)} icon={IconDashboard} tone="lime" />
-          <StatCard label="Orders" value={stats.totalOrders} icon={IconOrders} tone="blue" />
-          <StatCard label="Customers" value={stats.totalCustomers} icon={IconUsers} tone="orange" />
-          <StatCard label="Products" value={stats.totalProducts} icon={IconStore} tone="green" />
-        </section>
+            <section className="stats-grid" aria-label="Store stats">
+              <StatCard label="Revenue" value={formatCurrency(stats.revenue)} icon={IconDashboard} tone="lime" />
+              <StatCard label="Orders" value={stats.totalOrders} icon={IconOrders} tone="blue" />
+              <StatCard label="Customers" value={stats.totalCustomers} icon={IconUsers} tone="orange" />
+              <StatCard label="Products" value={stats.totalProducts} icon={IconStore} tone="green" />
+            </section>
+          </>
+        )}
 
         <section className="content-grid">
           {activeTab === 'analytics' && (
@@ -2480,14 +2988,21 @@ export default function Dashboard({ user, userProfile, onLogout }) {
                   products,
                 }}
                 onAppearanceSaved={(nextStoreInfo) => setStore((current) => ({ ...(current || storeInfo), ...nextStoreInfo }))}
+                compact={activeTab === 'overview'}
               />
             </div>
           )}
 
-          {(activeTab === 'overview' || activeTab === 'orders') && (
+          {activeTab === 'orders' && orderId && (
+            <div className="content-card full-span">
+              <OrderDetailPage key={orderId} orderId={orderId} />
+            </div>
+          )}
+
+          {activeTab === 'orders' && !orderId && (
             <div className="content-card">
               <div className="card-header">
-                <h3>Recent Orders</h3>
+                <h3>Orders</h3>
               </div>
               {orders.length > 0 ? (
                 <div className="orders-list">

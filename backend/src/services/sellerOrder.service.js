@@ -56,9 +56,10 @@ export async function createSellerOrderPaymentIntent({
 
   const reference = buildOrderReference(orderId);
   const amountKobo = Math.round(amount * 100);
-  const percentageCharge = toNumber(sellerProfile.percentageCharge, 0);
-  const platformCommission = Math.round((amountKobo * percentageCharge) / 100);
-  const sellerNetAmount = amountKobo - platformCommission;
+  // Sellers keep 100% of sales — Blorbify monetizes via platform/subscription
+  // fees, not sales commission. No commission is deducted here.
+  const platformCommission = 0;
+  const sellerNetAmount = amountKobo;
 
   const orderDoc = {
     sellerId,
@@ -184,8 +185,9 @@ export async function applySellerOrderPayment({ reference, verificationData, sou
   }
 
   const paidAt = verificationData.paid_at || verificationData.paidAt || verificationData.created_at || new Date().toISOString();
-  const platformCommission = toNumber(order.platformCommission || metadata.platformCommission || 0);
-  const sellerNetAmount = toNumber(order.sellerNetAmount || metadata.sellerNetAmount || expectedAmount - platformCommission);
+  // Sellers keep 100% of sales — no commission is deducted here either.
+  const platformCommission = 0;
+  const sellerNetAmount = expectedAmount;
 
   const paymentUpdate = {
     status: 'paid',

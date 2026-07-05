@@ -1,5 +1,4 @@
 import { adminDb, fieldValue } from '../config/firebaseAdmin.js';
-import { env } from '../config/env.js';
 import { createHttpError } from '../utils/httpError.js';
 import { createPaystackSubaccount, updatePaystackSubaccount } from '../config/paystack.js';
 
@@ -11,11 +10,6 @@ function normalizeAccountNumber(value) {
 
 function normalizeBankCode(value) {
   return String(value || '').trim();
-}
-
-function normalizePercent(value, fallback = 0) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : fallback;
 }
 
 export async function getSellerPayoutProfile(sellerId) {
@@ -32,7 +26,6 @@ export async function upsertSellerPayoutProfile({
   businessName,
   bankCode,
   accountNumber,
-  percentageCharge = env.blorbifyDefaultPlatformPercentage,
   description = '',
   primaryContactEmail = '',
   payload = {},
@@ -43,7 +36,6 @@ export async function upsertSellerPayoutProfile({
 
   const cleanBankCode = normalizeBankCode(bankCode);
   const cleanAccountNumber = normalizeAccountNumber(accountNumber);
-  const cleanPercentageCharge = normalizePercent(percentageCharge, 0);
 
   if (!businessName?.trim()) {
     throw createHttpError(400, 'businessName is required.');
@@ -60,12 +52,14 @@ export async function upsertSellerPayoutProfile({
   let existingProfile = await getSellerPayoutProfile(sellerId);
   let paystackResult;
 
+  // Sellers keep 100% of sales — Blorbify monetizes via platform/subscription
+  // fees, not sales commission. percentage_charge is always 0.
   if (existingProfile?.subaccountCode) {
     paystackResult = await updatePaystackSubaccount(existingProfile.subaccountCode, {
       business_name: businessName.trim(),
       bank_code: cleanBankCode,
       account_number: cleanAccountNumber,
-      percentage_charge: cleanPercentageCharge,
+      percentage_charge: 0,
       description,
       primary_contact_email: primaryContactEmail || undefined,
     });
@@ -74,7 +68,7 @@ export async function upsertSellerPayoutProfile({
       business_name: businessName.trim(),
       bank_code: cleanBankCode,
       account_number: cleanAccountNumber,
-      percentage_charge: cleanPercentageCharge,
+      percentage_charge: 0,
       description,
       primary_contact_email: primaryContactEmail || undefined,
     });
@@ -86,7 +80,7 @@ export async function upsertSellerPayoutProfile({
     businessName: businessName.trim(),
     bankCode: cleanBankCode,
     accountNumber: cleanAccountNumber,
-    percentageCharge: cleanPercentageCharge,
+    percentageCharge: 0,
     description: description || '',
     primaryContactEmail: primaryContactEmail || '',
     subaccountCode: paystackData.subaccount_code || paystackData.subaccountCode || existingProfile?.subaccountCode || '',

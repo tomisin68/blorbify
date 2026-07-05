@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import crypto from 'node:crypto';
 import { env, isProduction } from './config/env.js';
 import paymentsRoutes from './routes/payments.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
@@ -16,7 +17,10 @@ import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
 
-app.use(helmet());
+// CSP is set per-route (see /payment/callback) with a request-specific nonce;
+// Helmet's default CSP has no knowledge of that nonce and would block the inline
+// redirect script, so its built-in CSP is disabled here.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
   origin: env.clientOrigin,
   credentials: true,
@@ -71,6 +75,11 @@ app.get('/payment/callback', async (req, res) => {
           });
           continueUrl = metadata.returnUrl || result?.subscription?.returnUrl || '';
         }
+
+        if (continueUrl) {
+          const separator = continueUrl.includes('?') ? '&' : '?';
+          continueUrl = `${continueUrl}${separator}reference=${encodeURIComponent(rawReference)}`;
+        }
       }
     } catch (error) {
       console.error('Payment callback error:', error.message);
@@ -81,6 +90,12 @@ app.get('/payment/callback', async (req, res) => {
   const message = paymentStatus === 'success'
     ? 'Your payment was completed successfully.'
     : 'Your payment is being processed. You can safely return to the app.';
+
+  const cspNonce = crypto.randomBytes(16).toString('base64');
+  res.setHeader(
+    'Content-Security-Policy',
+    `default-src 'self'; base-uri 'self'; font-src 'self' https: data:; form-action 'self'; frame-ancestors 'self'; img-src 'self' data:; object-src 'none'; script-src 'self' 'nonce-${cspNonce}'; style-src 'self' https: 'unsafe-inline'; upgrade-insecure-requests`
+  );
 
   res.status(200).send(`<!doctype html>
   <html lang="en">
@@ -104,7 +119,7 @@ app.get('/payment/callback', async (req, res) => {
         ${rawReference ? `<p>Reference</p><code>${safe(rawReference)}</code>` : ''}
         ${continueUrl ? `<p style="margin-top:16px;">You will be redirected shortly.</p>` : '<p style="margin-top:16px;">You can close this tab and return to the app.</p>'}
       </main>
-      <script>
+      <script nonce="${cspNonce}">
         const continueUrl = ${JSON.stringify(continueUrl)};
         if (continueUrl) {
           setTimeout(() => { window.location.href = continueUrl; }, 2200);

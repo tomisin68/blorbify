@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { verifySubscriptionPayment } from './backendApi';
 
 function getReferenceFromLocation() {
@@ -7,6 +8,7 @@ function getReferenceFromLocation() {
 }
 
 export default function PaymentSuccess() {
+  const navigate = useNavigate();
   const [reference] = useState(() => getReferenceFromLocation());
   const [status, setStatus] = useState(() => (reference ? 'checking' : 'error'));
   const [message, setMessage] = useState(() =>
@@ -45,7 +47,7 @@ export default function PaymentSuccess() {
   }, [reference]);
 
   const goToDashboard = () => {
-    window.location.href = '/';
+    navigate('/dashboard');
   };
 
   const iconFor = {

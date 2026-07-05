@@ -39,7 +39,6 @@ export const env = {
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || '',
   paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || 'https://api.paystack.co',
-  blorbifyDefaultPlatformPercentage: toNumber(process.env.BLORBIFY_DEFAULT_PLATFORM_PERCENTAGE, 10),
   relaySharedSecret: process.env.RELAY_SHARED_SECRET || '',
   firebaseServiceAccount: parseJson(process.env.FIREBASE_SERVICE_ACCOUNT_KEY),
   smtpHost: process.env.SMTP_HOST || '',

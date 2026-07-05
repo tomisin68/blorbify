@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { getReadableTextColor, getStoreCopy, getStoreSocialLinks, getStoreTemplate, getTemplateTheme } from './storeTemplates';
@@ -6,6 +7,7 @@ import { createStoreSlug } from './storeLinks';
 import { useCart, productKey } from './storefront/useCart';
 import { useToasts } from './storefront/useToasts';
 import { formatCurrency, getSocialHref, getBusinessTypeLabel } from './storefront/storefrontUtils';
+import { getBackendOrigin, initializeSellerOrderPayment, verifySellerOrderPayment } from './backendApi';
 import SignatureTemplate from './storefront/SignatureTemplate';
 import NoirTemplate from './storefront/NoirTemplate';
 import BloomTemplate from './storefront/BloomTemplate';
@@ -26,11 +28,15 @@ const templateComponents = {
   atelier: AtelierTemplate,
 };
 
+function redirectTo(url) {
+  window.location.href = url;
+}
+
 export default function Storefront({ slug }) {
   const [store, setStore] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [customer, setCustomer] = useState({ name: '', phone: '', address: '', note: '' });
+  const [customer, setCustomer] = useState({ name: '', email: '', phone: '', whatsapp: '', location: '', address: '', note: '' });
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
@@ -40,6 +46,9 @@ export default function Storefront({ slug }) {
   const [activeCategory, setActiveCategory] = useState('All');
   const [wishlist, setWishlist] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialProductApplied, setInitialProductApplied] = useState(false);
+  const appliedOrderReferenceRef = useRef(false);
 
   const { toasts, notify, dismiss } = useToasts();
 
@@ -86,6 +95,43 @@ export default function Storefront({ slug }) {
       : []
   ), [store]);
 
+  // Auto-opens the product a shared link points to, the first time the store finishes loading.
+  // Adjusted during render (not an effect) since it's a one-time hydration from the URL.
+  if (!loading && !initialProductApplied) {
+    setInitialProductApplied(true);
+    const initialProductId = searchParams.get('product');
+    if (initialProductId && !selectedProduct) {
+      const match = products.find((product) => productKey(product) === initialProductId);
+      if (match) {
+        setSelectedProduct(match);
+      } else {
+        console.warn(`Storefront: product "${initialProductId}" from the shared link was not found in this store's catalog.`);
+      }
+    }
+  }
+
+  // Keeps the URL's `product` param in sync with whichever product modal is open, using replace
+  // so opening/closing the modal doesn't spam browser history.
+  useEffect(() => {
+    if (loading) return;
+
+    const productId = selectedProduct ? productKey(selectedProduct) : null;
+    const currentParam = searchParams.get('product');
+    if (productId === currentParam) return;
+
+    const nextParams = new URLSearchParams(searchParams);
+    if (productId) {
+      nextParams.set('product', productId);
+    } else {
+      nextParams.delete('product');
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [loading, selectedProduct, products, searchParams, setSearchParams]);
+
+  const productShareUrl = selectedProduct
+    ? `${window.location.origin}/${store?.storeSlug || slug}?${new URLSearchParams({ product: productKey(selectedProduct) }).toString()}`
+    : '';
+
   const { cart, cartCount, cartSubtotal, addToCart, updateQuantity, removeItem, clearCart } = useCart(store?.storeSlug || slug, {
     onAdd: (product, quantity) => {
       const phrase = addToCartPhrases[Math.floor(Math.random() * addToCartPhrases.length)];
@@ -94,6 +140,48 @@ export default function Storefront({ slug }) {
     onRemove: (item) => notify(`Removed ${item.name} from your cart`, { type: 'info' }),
     onLimit: (product) => notify(`That's all the ${product.name} we have in stock`, { type: 'error' }),
   });
+
+  // Picks up the ?reference= param Paystack's callback redirects back with
+  // after checkout, confirms the order actually got paid, then cleans the
+  // param off the URL so refreshing doesn't re-trigger this.
+  useEffect(() => {
+    if (loading) return;
+    if (appliedOrderReferenceRef.current) return;
+
+    const reference = searchParams.get('reference');
+    if (!reference) return;
+
+    appliedOrderReferenceRef.current = true;
+    let active = true;
+
+    verifySellerOrderPayment(reference)
+      .then((response) => {
+        if (!active) return;
+        const status = String(response?.data?.verification?.status || '').toLowerCase();
+        if (['success', 'paid', 'completed'].includes(status)) {
+          clearCart();
+          setOrderPlaced(true);
+        } else {
+          notify("We're still confirming your payment — check back shortly.", { type: 'info' });
+        }
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('Order payment verification failed:', error);
+        notify('We could not confirm your payment. Please contact the seller.', { type: 'error' });
+      })
+      .finally(() => {
+        if (!active) return;
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('reference');
+        nextParams.delete('trxref');
+        setSearchParams(nextParams, { replace: true });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [loading, searchParams, setSearchParams, clearCart, notify]);
 
   const deliveryFee = Number(store?.deliveryFee || 0);
   const cartTotal = cartSubtotal + (cart.length ? deliveryFee : 0);
@@ -152,11 +240,12 @@ export default function Storefront({ slug }) {
     }
 
     const name = customer.name.trim();
+    const email = customer.email.trim();
     const phone = customer.phone.trim();
     const address = customer.address.trim();
 
-    if (!name || !phone || !address) {
-      notify('We need your name, phone number, and delivery address to arrange delivery', { type: 'error' });
+    if (!name || !email || !phone || !address) {
+      notify('We need your name, email, phone number, and delivery address to arrange delivery', { type: 'error' });
       return;
     }
 
@@ -171,12 +260,15 @@ export default function Storefront({ slug }) {
         subtotal: Number(item.price || 0) * item.quantity,
       }));
 
-      await addDoc(collection(db, 'orders'), {
+      const orderRef = await addDoc(collection(db, 'orders'), {
         storeId: store.ownerId,
         storeSlug: store.storeSlug,
         storeName: store.businessName,
         customerName: name,
+        customerEmail: email,
         customerPhone: phone,
+        customerWhatsapp: customer.whatsapp.trim(),
+        customerLocation: customer.location,
         customerAddress: address,
         customerNote: customer.note.trim(),
         items: orderItems,
@@ -187,14 +279,28 @@ export default function Storefront({ slug }) {
         createdAt: serverTimestamp(),
       });
 
-      clearCart();
-      setCustomer({ name: '', phone: '', address: '', note: '' });
-      setOrderPlaced(true);
-      notify(`Order placed! ${store.businessName} will reach out shortly`, { type: 'order', duration: 5200 });
+      const response = await initializeSellerOrderPayment({
+        sellerId: store.ownerId,
+        orderId: orderRef.id,
+        email,
+        amountNaira: cartTotal,
+        callbackUrl: `${getBackendOrigin()}/payment/callback`,
+        returnUrl: `${window.location.origin}/${store.storeSlug}`,
+        buyerName: name,
+        buyerPhone: phone,
+        buyerAddress: address,
+        note: customer.note.trim(),
+      });
+
+      const authorizationUrl = response?.data?.paystack?.authorization_url;
+      if (!authorizationUrl) {
+        throw new Error('Paystack did not return a checkout link.');
+      }
+
+      redirectTo(authorizationUrl);
     } catch (error) {
       console.error('Order creation failed:', error);
       notify('Your order could not be placed — please try again', { type: 'error' });
-    } finally {
       setSubmittingOrder(false);
     }
   };
@@ -272,6 +378,7 @@ export default function Storefront({ slug }) {
     addToCart,
     selectedProduct,
     setSelectedProduct,
+    productShareUrl,
     cart,
     cartCount,
     cartSubtotal,

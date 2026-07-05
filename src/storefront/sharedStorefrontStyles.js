@@ -43,9 +43,9 @@ export const sharedStorefrontStyles = `
   .cart-total-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--store-muted); font-weight: 700; }
   .cart-total-row.grand { font-size: 16px; color: var(--store-ink); font-weight: 800; }
   .cart-checkout-form { display: grid; gap: 9px; }
-  .cart-checkout-form input, .cart-checkout-form textarea { width: 100%; padding: 11px 13px; border: 1.5px solid var(--store-line); border-radius: 12px; background: var(--store-card); outline: none; }
+  .cart-checkout-form input, .cart-checkout-form textarea, .cart-checkout-form select { width: 100%; padding: 11px 13px; border: 1.5px solid var(--store-line); border-radius: 12px; background: var(--store-card); outline: none; font: inherit; color: inherit; }
   .cart-checkout-form textarea { min-height: 62px; resize: vertical; }
-  .cart-checkout-form input:focus, .cart-checkout-form textarea:focus { border-color: var(--store-accent); }
+  .cart-checkout-form input:focus, .cart-checkout-form textarea:focus, .cart-checkout-form select:focus { border-color: var(--store-accent); }
   .cart-success { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px 28px; gap: 6px; overflow-y: auto; }
   .cart-success-badge { width: 60px; height: 60px; border-radius: 50%; background: var(--store-accent); color: var(--store-accent-text); display: grid; place-items: center; margin-bottom: 10px; }
   .cart-success h4 { color: inherit; margin: 0; font-family: var(--store-display); font-size: 22px; }

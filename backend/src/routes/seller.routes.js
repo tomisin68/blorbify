@@ -31,7 +31,6 @@ router.post('/:sellerId/subaccount', requireAuth, async (req, res) => {
       businessName,
       bankCode,
       accountNumber,
-      percentageCharge = 0,
       description = '',
       primaryContactEmail = '',
     } = req.body || {};
@@ -45,7 +44,6 @@ router.post('/:sellerId/subaccount', requireAuth, async (req, res) => {
       businessName,
       bankCode,
       accountNumber,
-      percentageCharge,
       description,
       primaryContactEmail: primaryContactEmail || req.user?.email || '',
       payload: {

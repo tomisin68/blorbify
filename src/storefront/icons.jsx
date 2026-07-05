@@ -56,6 +56,9 @@ export function StoreIcon({ name, size = 18 }) {
   if (name === 'grid') {
     return <svg {...common}><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.2" /><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.2" /><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.2" /><rect x="13" y="13" width="7.5" height="7.5" rx="1.2" /></svg>;
   }
+  if (name === 'link') {
+    return <svg {...common}><path d="M9.5 14.5 14.5 9.5" /><path d="M11 7.5 12.4 6a3.5 3.5 0 0 1 5 5L16 12.5" /><path d="M13 16.5 11.6 18a3.5 3.5 0 0 1-5-5L8 11.5" /></svg>;
+  }
   return null;
 }
 

@@ -10,6 +10,12 @@ function getBackendBaseUrl() {
   return '/api';
 }
 
+// The backend's root origin (no /api suffix) — needed for routes that live
+// outside the /api prefix, like the Paystack callback page.
+export function getBackendOrigin() {
+  return getBackendBaseUrl().replace(/\/api\/?$/, '');
+}
+
 async function resolveAuthToken(token) {
   if (token) {
     return token;
@@ -116,5 +122,28 @@ export async function initializeSubscriptionPayment(payload, token) {
 export async function verifySubscriptionPayment(reference) {
   return publicBackendRequest(`/payments/subscriptions/verify/${encodeURIComponent(reference)}`, {
     method: 'GET',
+  });
+}
+
+// Buyers checking out on a storefront aren't signed into Firebase, so these
+// use the unauthenticated request path.
+export async function initializeSellerOrderPayment(payload) {
+  return publicBackendRequest('/seller-orders/paystack/initialize', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function verifySellerOrderPayment(reference) {
+  return publicBackendRequest(`/seller-orders/paystack/verify/${encodeURIComponent(reference)}`, {
+    method: 'GET',
+  });
+}
+
+export async function notifyOrderStatusUpdate({ orderId, status }, token) {
+  return backendRequest('/notifications/order-status', {
+    method: 'POST',
+    token,
+    body: { orderId, status },
   });
 }
