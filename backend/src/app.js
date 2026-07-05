@@ -12,6 +12,7 @@ import sellerOrdersRoutes from './routes/sellerOrders.routes.js';
 import invoicesRoutes from './routes/invoices.routes.js';
 import reportsRoutes from './routes/reports.routes.js';
 import internalRoutes from './routes/internal.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 import { handlePaystackWebhook } from './controllers/webhooks.controller.js';
 import { verifyPaystackTransaction } from './config/paystack.js';
 import { applyVerifiedPayment } from './services/billing.service.js';
@@ -26,7 +27,13 @@ const app = express();
 // redirect script, so its built-in CSP is disabled here.
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: env.clientOrigin,
+  origin(origin, callback) {
+    // No Origin header (curl, server-to-server, Paystack webhooks) — allow.
+    if (!origin || env.clientOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(morgan(isProduction() ? 'combined' : 'dev'));
@@ -53,6 +60,7 @@ app.use('/api/seller-orders', sellerOrdersRoutes);
 app.use('/api/invoices', invoicesRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/internal', internalRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/payment/callback', async (req, res) => {
   const safe = (value) => String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

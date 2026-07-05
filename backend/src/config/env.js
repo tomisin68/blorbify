@@ -34,7 +34,14 @@ function parseJson(value) {
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: toNumber(process.env.PORT, 4000),
-  clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  clientOrigins: (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  adminEmails: (process.env.ADMIN_EMAILS || 'blorbmart@gmail.com')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
   appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:5173',
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || '',
   paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || '',

@@ -13,10 +13,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
-import { planPricing } from '@/lib/mock-data'
+import { LoadingBlock, ErrorBlock } from '@/components/data-state'
+import { useAsyncData } from '@/hooks/use-async-data'
+import { fetchSubscriptionPlans } from '@/lib/api'
 
 export function SettingsPage() {
   const { user } = useAuth()
+  const { data, loading, error, reload } = useAsyncData(fetchSubscriptionPlans)
+  const plans = data?.plans ?? []
 
   return (
     <div className="space-y-6">
@@ -42,21 +46,28 @@ export function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Plan pricing</CardTitle>
-          <CardDescription>Monthly price for each subscription tier (₦).</CardDescription>
+          <CardDescription>
+            Monthly price for each subscription tier (₦). Defined in the backend plan catalog — read-only here.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
-          {Object.entries(planPricing).map(([plan, price]) => (
-            <div key={plan} className="space-y-2">
-              <Label className="capitalize">{plan}</Label>
-              <Input type="number" defaultValue={price} />
+          {loading ? (
+            <div className="sm:col-span-3">
+              <LoadingBlock rows={1} />
             </div>
-          ))}
+          ) : error ? (
+            <div className="sm:col-span-3">
+              <ErrorBlock message={error} onRetry={reload} />
+            </div>
+          ) : (
+            plans.map((plan) => (
+              <div key={plan.id} className="space-y-2">
+                <Label>{plan.name}</Label>
+                <Input value={plan.amountNaira} disabled />
+              </div>
+            ))
+          )}
         </CardContent>
-        <CardFooter>
-          <Button onClick={() => toast.success('Plan pricing saved (mock — wire up to backend).')}>
-            Save changes
-          </Button>
-        </CardFooter>
       </Card>
 
       <Card>
