@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, doc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { arrayUnion, collection, doc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import {
   checkProductImageDimensions,
   uploadProductImage,
@@ -27,6 +27,7 @@ import {
 } from './storeTemplates';
 import LivePreviewFrame from './storefront/LivePreviewFrame';
 import { nigerianStates } from './nigerianStates';
+import { notifyOrderStatusUpdate } from './backendApi';
 
 const emptyStats = {
   revenue: 0,
@@ -187,13 +188,17 @@ const businessTypeOptions = [
   { value: 'others', label: 'Others' },
 ];
 
-const ORDER_STATUSES = [
+const ORDER_FLOW_STATUSES = [
   { value: 'pending', label: 'Pending' },
   { value: 'processing', label: 'Processing' },
   { value: 'shipped', label: 'Shipped' },
   { value: 'delivered', label: 'Delivered' },
-  { value: 'cancelled', label: 'Cancelled' },
 ];
+
+function getStatusHistoryAt(order, status) {
+  const entry = (order.statusHistory || []).find((item) => item?.status === status);
+  return entry?.at || (status === 'pending' ? order.createdAt : null);
+}
 
 function formatOrderTimestamp(timestamp) {
   if (!timestamp) return '';
@@ -259,7 +264,21 @@ function OrderDetailPage({ orderId }) {
     if (!order || nextStatus === order.status || updatingStatus) return;
     setUpdatingStatus(true);
     try {
-      await setDoc(doc(db, 'orders', orderId), { status: nextStatus, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(
+        doc(db, 'orders', orderId),
+        {
+          status: nextStatus,
+          statusHistory: arrayUnion({ status: nextStatus, at: new Date().toISOString() }),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (order.customerEmail) {
+        notifyOrderStatusUpdate({ orderId, status: nextStatus }).catch((error) => {
+          console.error('Order status email failed:', error);
+        });
+      }
     } catch (error) {
       console.error('Order status update failed:', error);
     } finally {
@@ -283,6 +302,9 @@ function OrderDetailPage({ orderId }) {
 
   const items = Array.isArray(order.items) ? order.items : [];
   const placedAt = formatOrderTimestamp(order.createdAt);
+  const currentStatus = order.status || 'pending';
+  const isCancelled = currentStatus === 'cancelled';
+  const currentIndex = ORDER_FLOW_STATUSES.findIndex((step) => step.value === currentStatus);
 
   return (
     <div className="order-detail">
@@ -298,21 +320,35 @@ function OrderDetailPage({ orderId }) {
         <strong>{formatCurrency(order.total || order.amount)}</strong>
       </div>
 
-      <div className="order-status-control">
-        <span>Status</span>
-        <div className="status-actions">
-          {ORDER_STATUSES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`status-btn ${(order.status || 'pending') === option.value ? 'active' : ''}`}
-              disabled={updatingStatus}
-              onClick={() => updateStatus(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
+      <div className="order-timeline">
+        {isCancelled && <div className="order-cancelled-banner">This order was cancelled.</div>}
+
+        <div className={`timeline ${isCancelled ? 'is-cancelled' : ''}`}>
+          {ORDER_FLOW_STATUSES.map((step, index) => {
+            const reached = !isCancelled && index <= currentIndex;
+            const isCurrent = !isCancelled && index === currentIndex;
+            const at = formatOrderTimestamp(getStatusHistoryAt(order, step.value));
+            return (
+              <button
+                key={step.value}
+                type="button"
+                className={`timeline-step ${reached ? 'reached' : ''} ${isCurrent ? 'current' : ''}`}
+                disabled={updatingStatus || isCancelled}
+                onClick={() => updateStatus(step.value)}
+              >
+                <span className="timeline-dot">{reached && !isCurrent ? '✓' : index + 1}</span>
+                <span className="timeline-label">{step.label}</span>
+                <span className="timeline-time">{at || '—'}</span>
+              </button>
+            );
+          })}
         </div>
+
+        {!isCancelled && currentStatus !== 'delivered' && (
+          <button type="button" className="btn-link btn-link-danger" disabled={updatingStatus} onClick={() => updateStatus('cancelled')}>
+            Cancel this order
+          </button>
+        )}
       </div>
 
       {items.length > 0 ? (
@@ -2167,24 +2203,64 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .order-detail-header h3 { margin: 0 0 4px; font-size: 18px; color: var(--ink); }
         .order-detail-header span { font-size: 12.5px; color: var(--slate); }
         .order-detail-header strong { font-size: 18px; color: var(--ink); white-space: nowrap; }
-        .order-status-control { display: grid; gap: 8px; }
-        .order-status-control > span { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--slate); }
-        .status-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-        .status-btn {
-          border: 1.5px solid var(--line);
-          border-radius: 999px;
-          background: #fff;
-          color: var(--ink);
-          padding: 7px 14px;
-          font: inherit;
-          font-size: 12.5px;
+        .order-timeline { display: grid; gap: 12px; padding: 4px 0 14px; border-bottom: 1px dashed var(--line); }
+        .order-cancelled-banner {
+          border-radius: 8px;
+          background: rgba(220,38,38,.1);
+          color: #b91c1c;
+          border: 1px solid rgba(220,38,38,.25);
+          padding: 9px 12px;
+          font-size: 13px;
           font-weight: 800;
+        }
+        .timeline { display: flex; align-items: flex-start; }
+        .timeline.is-cancelled { opacity: .45; }
+        .timeline-step {
+          flex: 1;
+          position: relative;
+          display: grid;
+          justify-items: center;
+          gap: 4px;
+          border: 0;
+          background: transparent;
+          font: inherit;
+          padding: 0 4px 0;
           cursor: pointer;
         }
-        .status-btn:hover { border-color: var(--ink); }
-        .status-btn.active { background: var(--ink); border-color: var(--ink); color: #fff; }
-        .status-btn:disabled { opacity: .6; cursor: not-allowed; }
+        .timeline-step:disabled { cursor: not-allowed; }
+        .timeline-step::before {
+          content: '';
+          position: absolute;
+          top: 13px;
+          left: -50%;
+          width: 100%;
+          height: 2px;
+          background: var(--paper-dim);
+          z-index: 0;
+        }
+        .timeline-step:first-child::before { display: none; }
+        .timeline-step.reached::before { background: var(--ink); }
+        .timeline-dot {
+          position: relative;
+          z-index: 1;
+          width: 27px;
+          height: 27px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          border: 2px solid var(--line);
+          background: #fff;
+          color: var(--slate);
+          font-size: 12px;
+          font-weight: 900;
+        }
+        .timeline-step.reached .timeline-dot { border-color: var(--ink); background: var(--ink); color: #fff; }
+        .timeline-step.current .timeline-dot { box-shadow: 0 0 0 3px rgba(175,255,0,.35); }
+        .timeline-label { font-size: 12.5px; font-weight: 800; color: var(--ink); }
+        .timeline-step:not(.reached) .timeline-label { color: var(--slate); }
+        .timeline-time { font-size: 11px; color: var(--slate); }
         .btn-link {
+          justify-self: start;
           border: 0;
           background: transparent;
           color: var(--ink);
@@ -2194,6 +2270,8 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           padding: 0;
           cursor: pointer;
         }
+        .btn-link-danger { color: #b91c1c; }
+        .btn-link:disabled { opacity: .6; cursor: not-allowed; }
         .empty-state {
           border: 1px dashed var(--line);
           border-radius: 8px;

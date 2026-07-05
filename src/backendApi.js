@@ -139,3 +139,11 @@ export async function verifySellerOrderPayment(reference) {
     method: 'GET',
   });
 }
+
+export async function notifyOrderStatusUpdate({ orderId, status }, token) {
+  return backendRequest('/notifications/order-status', {
+    method: 'POST',
+    token,
+    body: { orderId, status },
+  });
+}

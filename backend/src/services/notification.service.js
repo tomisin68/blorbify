@@ -87,6 +87,57 @@ export async function queueWelcomeNotification({ user, subscription }) {
   return notification;
 }
 
+const ORDER_STATUS_EMAIL_COPY = {
+  pending: {
+    subject: (storeName) => `Your order from ${storeName} is pending`,
+    message: 'Your order has been received and is pending confirmation.',
+  },
+  processing: {
+    subject: (storeName) => `Your order from ${storeName} is being processed`,
+    message: 'Good news — your order is now being processed and will be shipped soon.',
+  },
+  shipped: {
+    subject: (storeName) => `Your order from ${storeName} has shipped`,
+    message: 'Your order is on its way!',
+  },
+  delivered: {
+    subject: (storeName) => `Your order from ${storeName} has been delivered`,
+    message: 'Your order has been marked as delivered. We hope you love it!',
+  },
+  cancelled: {
+    subject: (storeName) => `Your order from ${storeName} was cancelled`,
+    message: 'Your order has been cancelled. If this is unexpected, please reach out to the seller.',
+  },
+};
+
+export async function sendOrderStatusEmail({ order, status, storeName }) {
+  const copy = ORDER_STATUS_EMAIL_COPY[status];
+  if (!copy || !order.customerEmail) {
+    return { sent: false, skipped: true };
+  }
+
+  const resolvedStoreName = storeName || order.storeName || 'your seller';
+  const subject = copy.subject(resolvedStoreName);
+  const recipientName = order.customerName || 'there';
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#192328;">
+      <h2 style="margin:0 0 12px;">${subject}</h2>
+      <p style="margin:0 0 12px;">Hi ${recipientName},</p>
+      <p style="margin:0 0 12px;">${copy.message}</p>
+      <p style="margin:0 0 12px;">Order reference: <strong>${order.id || ''}</strong></p>
+    </div>
+  `;
+  const text = `${subject}\n\nHi ${recipientName},\n\n${copy.message}\n\nOrder reference: ${order.id || ''}`;
+
+  return sendEmail({
+    to: order.customerEmail,
+    subject,
+    html,
+    text,
+    data: { orderId: order.id || null, status },
+  });
+}
+
 export async function queueOrderNotification({ store, order }) {
   return queueNotification({
     type: 'order',
