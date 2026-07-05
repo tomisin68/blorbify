@@ -1,101 +1,30 @@
-export const storeTemplates = [
-  {
-    id: 'modern',
-    name: 'Modern',
-    description: 'Clean, minimalist design perfect for any business',
-    accent: '#AFFF00',
-    surface: '#F6F8F1',
-    ink: '#192328',
-    card: '#FFFFFF',
-    button: '#AFFF00',
-    buttonText: '#192328',
-    layout: 'panel',
-  },
-  {
-    id: 'elegant',
-    name: 'Elegant',
-    description: 'Sophisticated look for fashion, beauty, and luxury',
-    accent: '#D4AF37',
-    surface: '#F7F1E7',
-    ink: '#17130F',
-    card: '#FFFDF8',
-    button: '#17130F',
-    buttonText: '#FFFFFF',
-    layout: 'editorial',
-  },
-  {
-    id: 'bold',
-    name: 'Bold',
-    description: 'Vibrant and eye-catching for energetic brands',
-    accent: '#FF6B35',
-    surface: '#FFF4F0',
-    ink: '#16191D',
-    card: '#FFFFFF',
-    button: '#FF6B35',
-    buttonText: '#16191D',
-    layout: 'dark',
-  },
-  {
-    id: 'minimal',
-    name: 'Minimal',
-    description: 'Simple, clean, and focused on your products',
-    accent: '#2C3E50',
-    surface: '#F4F6F6',
-    ink: '#1B2631',
-    card: '#FFFFFF',
-    button: '#1B2631',
-    buttonText: '#FFFFFF',
-    layout: 'minimal',
-  },
-  {
-    id: 'oakmoss',
-    name: 'Fondé',
-    description: 'A warm editorial storefront with layered hero imagery, curated categories, and premium product cards',
-    accent: '#1F3D2B',
-    surface: '#FAF7F1',
-    ink: '#16150F',
-    card: '#FFFFFF',
-    button: '#1F3D2B',
-    buttonText: '#FFFFFF',
-    layout: 'split',
-  },
-  {
-    id: 'atelier',
-    name: 'Atelier',
-    description: 'Soft boutique layout for makers, beauty, and premium services',
-    accent: '#B5603F',
-    surface: '#F3E3DA',
-    ink: '#2B211D',
-    card: '#FFF8F4',
-    button: '#B5603F',
-    buttonText: '#FFFFFF',
-    layout: 'boutique',
-  },
-  {
-    id: 'market',
-    name: 'Market',
-    description: 'Bright, direct, and high-conversion for everyday retail',
-    accent: '#008A5B',
-    surface: '#F4FBF7',
-    ink: '#10261E',
-    card: '#FFFFFF',
-    button: '#008A5B',
-    buttonText: '#FFFFFF',
-    layout: 'market',
-  },
-  {
-    id: 'studio',
-    name: 'Studio',
-    description: 'Polished dark showroom for electronics, art, and modern brands',
-    accent: '#57D9FF',
-    surface: '#101417',
-    ink: '#F4F8FA',
-    card: '#171E22',
-    button: '#57D9FF',
-    buttonText: '#101417',
-    layout: 'showroom',
-  },
-];
+export const signatureTemplate = {
+  id: 'signature',
+  name: 'Signature',
+  description: "Blorbify's flagship storefront — clean, editorial, and built to convert.",
+  accent: '#AFFF00',
+  surface: '#F6F8F1',
+  ink: '#141B1E',
+  card: '#FFFFFF',
+  button: '#141B1E',
+  buttonText: '#F6F8F1',
+  layout: 'signature',
+};
+
+export const noirTemplate = {
+  id: 'noir',
+  name: 'Noir',
+  description: 'A bold, dark gallery storefront with full-bleed imagery — for fashion, art, and premium brands.',
+  accent: '#D9A441',
+  surface: '#0B0B0C',
+  ink: '#F5F5F2',
+  card: '#17171A',
+  button: '#F5F5F2',
+  buttonText: '#0B0B0C',
+  layout: 'noir',
+};
+
+export const storeTemplates = [signatureTemplate, noirTemplate];
 
 export const colorPresets = [
   '#AFFF00',
@@ -123,7 +52,7 @@ export const defaultStoreCopy = {
   productsHeading: 'Shop products',
   productsSubheading: '',
   addToCartLabel: 'Add to cart',
-  checkoutLabel: 'Checkout',
+  checkoutLabel: 'Place order',
   footerText: '',
 };
 
@@ -137,7 +66,7 @@ export const socialLinkFields = [
 ];
 
 export function getStoreTemplate(templateId) {
-  return storeTemplates.find((template) => template.id === templateId) || storeTemplates[0];
+  return storeTemplates.find((template) => template.id === templateId) || signatureTemplate;
 }
 
 export function getReadableTextColor(backgroundColor, dark = '#192328', light = '#FFFFFF') {

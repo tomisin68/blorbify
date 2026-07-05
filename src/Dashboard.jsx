@@ -11,6 +11,7 @@ import {
 import { db } from './firebase';
 import { createStoreSlug, getStoreUrl } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
+import { getProductImages, getProductCoverImage, MAX_PRODUCT_IMAGES } from './productImages';
 import SellerPayoutPanel from './SellerPayoutPanel';
 import BillingPanel from './BillingPanel';
 import {
@@ -19,10 +20,10 @@ import {
   getStoreCopy,
   getStoreSocialLinks,
   getTemplateTheme,
-  getStoreTemplate,
   socialLinkFields,
   storeTemplates,
 } from './storeTemplates';
+import LivePreviewFrame from './storefront/LivePreviewFrame';
 
 const emptyStats = {
   revenue: 0,
@@ -217,9 +218,13 @@ const emptyProductForm = {
   description: '',
   category: '',
   stock: '',
-  imageFile: null,
-  existingImageUrl: '',
 };
+
+let imageItemSeq = 0;
+function nextImageItemId() {
+  imageItemSeq += 1;
+  return `img-${Date.now()}-${imageItemSeq}`;
+}
 
 function getProductKey(product, index) {
   return product.id || product.imagePublicId || product.imageUrl || `${product.name || 'product'}-${index}`;
@@ -236,7 +241,7 @@ async function publishPublicStore(storeInfo, userId) {
 
 function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
   const [form, setForm] = useState(emptyProductForm);
-  const [imagePreview, setImagePreview] = useState('');
+  const [imageItems, setImageItems] = useState([]);
   const [saving, setSaving] = useState(false);
   const [editingKey, setEditingKey] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -246,9 +251,12 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
 
   useEffect(() => {
     return () => {
-      if (imagePreview) URL.revokeObjectURL(imagePreview);
+      imageItems.forEach((item) => {
+        if (item.kind === 'new') URL.revokeObjectURL(item.previewUrl);
+      });
     };
-  }, [imagePreview]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -256,32 +264,57 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
     setSuccess('');
   };
 
-  const handleImageChange = (event) => {
-    const file = event.target.files?.[0] || null;
-    const validationError = file ? validateProductImage(file) : '';
+  const handleImagesChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
 
-    if (imagePreview) {
-      URL.revokeObjectURL(imagePreview);
-    }
-
-    if (validationError) {
-      event.target.value = '';
-      setImagePreview('');
-      updateField('imageFile', null);
-      setError(validationError);
+    const room = MAX_PRODUCT_IMAGES - imageItems.length;
+    if (room <= 0) {
+      setError(`You can add up to ${MAX_PRODUCT_IMAGES} photos per product.`);
       return;
     }
 
-    setImagePreview(file ? URL.createObjectURL(file) : '');
-    updateField('imageFile', file);
+    const accepted = [];
+    let validationError = '';
+    for (const file of files.slice(0, room)) {
+      const fileError = validateProductImage(file);
+      if (fileError) {
+        validationError = fileError;
+        continue;
+      }
+      accepted.push({ uid: nextImageItemId(), kind: 'new', file, previewUrl: URL.createObjectURL(file) });
+    }
+
+    if (accepted.length) {
+      setImageItems((current) => [...current, ...accepted]);
+    }
+    if (files.length > room) {
+      setError(`You can add up to ${MAX_PRODUCT_IMAGES} photos per product.`);
+    } else if (validationError) {
+      setError(validationError);
+    } else {
+      setError('');
+      setSuccess('');
+    }
+  };
+
+  const removeImageItem = (uid) => {
+    setImageItems((current) => {
+      const target = current.find((item) => item.uid === uid);
+      if (target?.kind === 'new') URL.revokeObjectURL(target.previewUrl);
+      return current.filter((item) => item.uid !== uid);
+    });
+    setError('');
+    setSuccess('');
   };
 
   const resetForm = () => {
-    if (imagePreview) {
-      URL.revokeObjectURL(imagePreview);
-    }
+    imageItems.forEach((item) => {
+      if (item.kind === 'new') URL.revokeObjectURL(item.previewUrl);
+    });
     setForm(emptyProductForm);
-    setImagePreview('');
+    setImageItems([]);
     setEditingKey('');
     setUploadProgress(0);
   };
@@ -329,26 +362,52 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
       return;
     }
 
-    const imageError = form.imageFile ? validateProductImage(form.imageFile) : '';
-    if (!editingKey && !form.imageFile) {
-      setError('Please choose a product image.');
+    if (!imageItems.length) {
+      setError('Add at least one product photo.');
       return;
     }
 
-    if (imageError) {
-      setError(imageError);
-      return;
-    }
+    const newItems = imageItems.filter((item) => item.kind === 'new');
 
     setSaving(true);
-    setUploadProgress(form.imageFile ? 1 : 0);
+    setUploadProgress(newItems.length ? 1 : 0);
     try {
       const currentProduct = editingKey
         ? products.find((item, index) => getProductKey(item, index) === editingKey)
         : null;
-      const image = form.imageFile
-        ? await uploadProductImage(form.imageFile, `blorbify/products/${userId}`, setUploadProgress)
-        : null;
+
+      let completedUploads = 0;
+      const images = [];
+      for (const item of imageItems) {
+        if (item.kind === 'existing') {
+          images.push({
+            url: item.url,
+            publicId: item.publicId || '',
+            width: item.width || null,
+            height: item.height || null,
+            format: item.format || '',
+            bytes: item.bytes || null,
+          });
+          continue;
+        }
+
+        const uploaded = await uploadProductImage(item.file, `blorbify/products/${userId}`, (fileProgress) => {
+          const overall = ((completedUploads + fileProgress / 100) / newItems.length) * 100;
+          setUploadProgress(Math.round(overall));
+        });
+        completedUploads += 1;
+        setUploadProgress(Math.round((completedUploads / newItems.length) * 100));
+        images.push({
+          url: uploaded.secureUrl,
+          publicId: uploaded.publicId,
+          width: uploaded.width,
+          height: uploaded.height,
+          format: uploaded.format,
+          bytes: uploaded.bytes,
+        });
+      }
+
+      const cover = images[0];
       const now = new Date().toISOString();
       const product = {
         ...(currentProduct || {}),
@@ -358,12 +417,13 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
         description: form.description.trim(),
         category: form.category.trim(),
         stock,
-        imageUrl: image?.secureUrl || currentProduct?.imageUrl || form.existingImageUrl,
-        imagePublicId: image?.publicId || currentProduct?.imagePublicId || '',
-        imageWidth: image?.width || currentProduct?.imageWidth || null,
-        imageHeight: image?.height || currentProduct?.imageHeight || null,
-        imageFormat: image?.format || currentProduct?.imageFormat || '',
-        imageBytes: image?.bytes || currentProduct?.imageBytes || null,
+        images,
+        imageUrl: cover?.url || '',
+        imagePublicId: cover?.publicId || '',
+        imageWidth: cover?.width || null,
+        imageHeight: cover?.height || null,
+        imageFormat: cover?.format || '',
+        imageBytes: cover?.bytes || null,
         status: currentProduct?.status || 'active',
         createdAt: currentProduct?.createdAt || now,
         updatedAt: now,
@@ -385,12 +445,16 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
   };
 
   const handleEdit = (product, productKey) => {
-    if (imagePreview) {
-      URL.revokeObjectURL(imagePreview);
-    }
+    imageItems.forEach((item) => {
+      if (item.kind === 'new') URL.revokeObjectURL(item.previewUrl);
+    });
 
     setEditingKey(productKey);
-    setImagePreview('');
+    setImageItems(getProductImages(product).map((image) => ({
+      uid: nextImageItemId(),
+      kind: 'existing',
+      ...image,
+    })));
     setUploadProgress(0);
     setError('');
     setSuccess('');
@@ -400,8 +464,6 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
       description: product.description || '',
       category: product.category || '',
       stock: product.stock ?? '',
-      imageFile: null,
-      existingImageUrl: product.imageUrl || '',
     });
   };
 
@@ -457,27 +519,31 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
             </label>
           </div>
 
-          <label className={`image-drop ${imagePreview || form.existingImageUrl ? 'has-image' : ''}`}>
-            {imagePreview ? (
-              <img src={imagePreview} alt="Selected product preview" />
-            ) : form.existingImageUrl ? (
-              <img src={form.existingImageUrl} alt="Current product" />
-            ) : (
-              <span>
-                <IconImage size={24} />
-                Upload product image
-              </span>
+          <span className="control-label">Product photos ({imageItems.length}/{MAX_PRODUCT_IMAGES})</span>
+          <div className="image-drop-grid">
+            {imageItems.map((item, index) => (
+              <div className={`image-tile ${index === 0 ? 'cover' : ''}`} key={item.uid}>
+                <img src={item.kind === 'new' ? item.previewUrl : item.url} alt="" />
+                {index === 0 && <span className="image-tile-cover-badge">Cover</span>}
+                <button type="button" className="image-tile-remove" onClick={() => removeImageItem(item.uid)} aria-label="Remove photo">
+                  <IconClose size={14} />
+                </button>
+              </div>
+            ))}
+            {imageItems.length < MAX_PRODUCT_IMAGES && (
+              <label className="image-tile image-tile-add">
+                <IconImage size={22} />
+                <span>Add photo{imageItems.length ? '' : 's'}</span>
+                <input type="file" accept="image/*" multiple onChange={handleImagesChange} />
+              </label>
             )}
-            <input type="file" accept="image/*" onChange={handleImageChange} />
-          </label>
-          {editingKey && form.existingImageUrl && !form.imageFile && (
-            <p className="image-help">Choose a new image only if you want to replace the current one.</p>
-          )}
+          </div>
+          <p className="image-help">The first photo is used as the cover image on your storefront. Add up to {MAX_PRODUCT_IMAGES} per product.</p>
 
-          {saving && form.imageFile && (
+          {saving && imageItems.some((item) => item.kind === 'new') && (
             <div className="upload-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={uploadProgress}>
               <div>
-                <span>Uploading image</span>
+                <span>Uploading photos</span>
                 <strong>{uploadProgress}%</strong>
               </div>
               <progress value={uploadProgress} max="100" />
@@ -488,7 +554,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
           {success && <div className="form-alert success">{success}</div>}
 
           <button type="submit" className="product-submit" disabled={saving}>
-            {saving ? (form.imageFile ? 'Uploading image...' : 'Saving changes...') : <><IconPlus size={17} /> {editingKey ? 'Save changes' : 'Add product'}</>}
+            {saving ? (imageItems.some((item) => item.kind === 'new') ? 'Uploading photos...' : 'Saving changes...') : <><IconPlus size={17} /> {editingKey ? 'Save changes' : 'Add product'}</>}
           </button>
         </form>
 
@@ -503,9 +569,13 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
               {products.map((product, index) => {
                 const productKey = getProductKey(product, index);
 
+                const productImages = getProductImages(product);
                 return (
                 <article className="product-card" key={productKey}>
-                  <img src={product.imageUrl} alt={product.name} />
+                  <div className="product-card-media">
+                    <img src={getProductCoverImage(product)} alt={product.name} />
+                    {productImages.length > 1 && <span className="product-card-photo-count">+{productImages.length - 1}</span>}
+                  </div>
                   <div className="product-card-body">
                     <div>
                       <strong>{product.name}</strong>
@@ -750,8 +820,8 @@ const copyFieldRows = [
 ];
 
 function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
-  const [selectedTemplate, setSelectedTemplate] = useState(storeInfo.template || 'modern');
-  const [themeColors, setThemeColors] = useState(() => getTemplateTheme(storeInfo.template || 'modern', storeInfo));
+  const [selectedTemplate, setSelectedTemplate] = useState(storeInfo.template || 'signature');
+  const [themeColors, setThemeColors] = useState(() => getTemplateTheme(storeInfo.template || 'signature', storeInfo));
   const [copy, setCopy] = useState(() => getStoreCopy(storeInfo));
   const [socials, setSocials] = useState(() => getStoreSocialLinks(storeInfo));
   const [deliveryFee, setDeliveryFee] = useState(storeInfo.deliveryFee ?? '');
@@ -773,14 +843,23 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
     };
   }, [bannerPreview, logoPreview]);
 
-  const template = getStoreTemplate(selectedTemplate);
   const previewLogo = logoPreview || existingLogoUrl;
   const previewBanner = bannerPreview || existingBannerUrl;
-  const previewProducts = Array.isArray(storeInfo.products)
-    ? storeInfo.products.filter((product) => product?.name && product?.imageUrl).slice(0, 4)
-    : [];
-  const previewPrimaryImage = previewBanner || previewProducts[0]?.imageUrl || '';
-  const previewSecondaryImage = previewProducts[1]?.imageUrl || previewPrimaryImage;
+  const livePreviewStore = {
+    ...storeInfo,
+    ...copy,
+    ...socials,
+    template: selectedTemplate,
+    primaryColor: themeColors.primaryColor,
+    backgroundColor: themeColors.backgroundColor,
+    textColor: themeColors.textColor,
+    cardColor: themeColors.cardColor,
+    buttonColor: themeColors.buttonColor,
+    buttonTextColor: themeColors.buttonTextColor,
+    logoUrl: previewLogo,
+    bannerUrl: previewBanner,
+    deliveryFee: deliveryFee === '' ? 0 : Number(String(deliveryFee).replace(/[^\d.]/g, '')) || 0,
+  };
 
   const clearMessages = () => {
     setError('');
@@ -941,30 +1020,30 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
   };
 
   return (
-    <form className="appearance-editor" onSubmit={handleSubmit}>
+    <div className="appearance-editor">
       <div className="appearance-controls">
         <div>
-          <span className="control-label">Template</span>
+          <span className="control-label">Design</span>
           <div className="template-choice-grid">
-            {storeTemplates.map((storeTemplate) => {
-              const swatchTheme = getTemplateTheme(storeTemplate.id);
-              return (
-                <button
-                  key={storeTemplate.id}
-                  type="button"
-                  className={`template-choice ${selectedTemplate === storeTemplate.id ? 'selected' : ''}`}
-                  onClick={() => handleTemplateSelect(storeTemplate.id)}
+            {storeTemplates.map((storeTemplate) => (
+              <button
+                key={storeTemplate.id}
+                type="button"
+                className={`template-choice ${selectedTemplate === storeTemplate.id ? 'selected' : ''}`}
+                onClick={() => handleTemplateSelect(storeTemplate.id)}
+              >
+                <span
+                  className={`template-swatch preview-${storeTemplate.id}`}
+                  style={{ '--preview-accent': storeTemplate.accent, '--preview-ink': storeTemplate.ink, '--preview-surface': storeTemplate.surface }}
                 >
-                  <span className={`template-swatch preview-${storeTemplate.id}`} style={{ '--preview-accent': swatchTheme.primaryColor, '--preview-ink': swatchTheme.textColor, '--preview-surface': swatchTheme.backgroundColor }}>
-                    <i />
-                    <b />
-                    <em />
-                  </span>
-                  <strong>{storeTemplate.name}</strong>
-                  <small>{storeTemplate.description}</small>
-                </button>
-              );
-            })}
+                  <i />
+                  <b />
+                  <em />
+                </span>
+                <strong>{storeTemplate.name}</strong>
+                <small>{storeTemplate.description}</small>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -1085,79 +1164,17 @@ function AppearanceEditor({ userId, storeInfo, onAppearanceSaved }) {
         {error && <div className="form-alert error">{error}</div>}
         {success && <div className="form-alert success">{success}</div>}
 
-        <button type="submit" className="product-submit" disabled={saving}>
+        <button type="button" className="product-submit" onClick={handleSubmit} disabled={saving}>
           {saving ? (logoFile || bannerFile ? 'Uploading image...' : 'Saving appearance...') : 'Save appearance'}
         </button>
       </div>
 
-      <div
-        className={`appearance-live-preview storefront-${template.id}`}
-        style={{
-          '--preview-accent': themeColors.primaryColor,
-          '--preview-accent-text': themeColors.buttonTextColor,
-          '--preview-ink': themeColors.textColor,
-          '--preview-surface': themeColors.backgroundColor,
-          '--preview-card': themeColors.cardColor,
-          '--preview-button': themeColors.buttonColor,
-          '--preview-button-text': themeColors.buttonTextColor,
-        }}
-      >
-        <div className="preview-shell">
-          {copy.announcement && <div className="preview-announcement">{copy.announcement}</div>}
-          <div className="preview-nav">
-            <div className="preview-brand">
-              <span className="preview-logo">
-                {previewLogo ? <img src={previewLogo} alt="" /> : (storeInfo.businessName || 'S').charAt(0)}
-              </span>
-              <div>
-                <strong>{storeInfo.businessName || 'Your store'}</strong>
-                <small>{storeInfo.businessType || 'Online store'}</small>
-              </div>
-            </div>
-            <div className="preview-links" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="preview-actions" aria-hidden="true">
-              <i />
-              <i />
-            </div>
-          </div>
-          <div className={`preview-hero ${previewPrimaryImage ? 'has-banner' : ''}`}>
-            <div className="preview-hero-copy">
-              <span>{copy.heroEyebrow || storeInfo.city || 'Open online'}</span>
-              <h4>{copy.heroHeadline || storeInfo.businessName || 'Your store'}</h4>
-              <p>{copy.heroSubtext || storeInfo.description || 'Browse our products and contact us to place your order.'}</p>
-              <button type="button">{copy.primaryButtonLabel || defaultStoreCopy.primaryButtonLabel}</button>
-            </div>
-            <div className="preview-visual" aria-hidden="true">
-              <div className="preview-frame main">
-                {previewPrimaryImage && <img src={previewPrimaryImage} alt="" />}
-              </div>
-              <div className="preview-frame small">
-                {previewSecondaryImage && <img src={previewSecondaryImage} alt="" />}
-              </div>
-              <div className="preview-float">5.0</div>
-            </div>
-          </div>
-          <div className="preview-benefits" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="preview-product-strip" aria-hidden="true">
-            {(previewProducts.length ? previewProducts : [null, null, null]).slice(0, 3).map((product, index) => (
-              <div className="preview-product" key={product?.id || product?.imageUrl || index}>
-                {product?.imageUrl && <img src={product.imageUrl} alt="" />}
-                <b />
-                <span />
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="appearance-preview-col">
+        <span className="control-label">Live preview</span>
+        <LivePreviewFrame store={livePreviewStore} />
+        <p className="preview-hint">This is your actual storefront design, scaled down — exactly what buyers will see at {storeInfo.storeSlug ? getStoreUrl(storeInfo.storeSlug) : 'your store URL'}.</p>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -1618,8 +1635,8 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           gap: 10px;
         }
         .template-choice {
-          border: 1px solid var(--line);
-          border-radius: 8px;
+          border: 2px solid var(--line);
+          border-radius: 12px;
           background: #fff;
           color: var(--ink);
           padding: 10px;
@@ -1644,7 +1661,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           line-height: 1.35;
         }
         .template-swatch {
-          height: 76px;
+          height: 72px;
           border-radius: 8px;
           background: var(--preview-surface);
           border: 1px solid rgba(25,35,40,.08);
@@ -1675,44 +1692,27 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           background: rgba(25,35,40,.22);
           display: block;
         }
-        .template-swatch.preview-elegant,
-        .template-swatch.preview-elegant i,
-        .template-swatch.preview-elegant b,
-        .template-swatch.preview-elegant em { border-radius: 0; }
-        .template-swatch.preview-bold { background: var(--preview-ink); }
-        .template-swatch.preview-bold b { background: #fff; }
-        .template-swatch.preview-bold em { background: rgba(255,255,255,.36); }
-        .template-swatch.preview-minimal { background: #fff; }
-        .template-swatch.preview-oakmoss {
-          background: #FAF7F1;
-          border-color: #E7E0D2;
-          grid-template-columns: 1.05fr .95fr;
+        .template-swatch.preview-noir {
+          grid-template-columns: 1fr 1fr;
           grid-template-rows: 1fr auto auto;
           align-content: stretch;
           gap: 6px;
         }
-        .template-swatch.preview-oakmoss i {
+        .template-swatch.preview-noir i {
           grid-row: 1 / 4;
           width: auto;
           height: auto;
-          border-radius: 16px;
-          background:
-            linear-gradient(135deg, rgba(31,61,43,.15), rgba(198,149,47,.25)),
-            #F1ECE1;
-          box-shadow: 0 12px 20px -14px rgba(22,21,15,.34);
+          border-radius: 4px;
+          background: linear-gradient(150deg, color-mix(in srgb, var(--preview-accent) 30%, var(--preview-ink)), var(--preview-ink));
         }
-        .template-swatch.preview-oakmoss b {
+        .template-swatch.preview-noir b {
           align-self: end;
-          width: 100%;
-          height: 24px;
-          border-radius: 12px;
-          background: #1F3D2B;
+          border-radius: 3px;
         }
-        .template-swatch.preview-oakmoss em {
-          width: 72%;
-          height: 8px;
-          border-radius: 999px;
-          background: #C6952F;
+        .template-swatch.preview-noir em {
+          border-radius: 3px;
+          background: var(--preview-accent);
+          height: 7px;
         }
         .color-choice-grid {
           display: flex;
@@ -1806,340 +1806,17 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .banner-drop img {
           height: 210px;
         }
-        .appearance-live-preview {
-          min-height: 100%;
-          border-radius: 8px;
-          background: var(--preview-surface);
-          color: var(--preview-ink);
-          border: 1px solid var(--line);
-          padding: 16px;
+        .appearance-preview-col {
+          position: sticky;
+          top: 16px;
           display: grid;
-          align-content: center;
-        }
-        .appearance-live-preview.storefront-oakmoss {
-          background: #FAF7F1;
-          color: #16150F;
-        }
-        .preview-shell {
-          border-radius: 8px;
-          background: var(--preview-card);
-          border: 1px solid color-mix(in srgb, var(--preview-ink) 10%, transparent);
-          padding: 16px;
-          box-shadow: 0 16px 36px rgba(25,35,40,.1);
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-shell {
-          border-radius: 18px;
-          background: #FAF7F1;
-          border-color: #E7E0D2;
-          box-shadow: 0 24px 54px rgba(22,21,15,.12);
-        }
-        .preview-announcement {
-          border-radius: 8px;
-          background: var(--preview-ink);
-          color: var(--preview-surface);
-          padding: 8px 10px;
-          margin-bottom: 14px;
-          text-align: center;
-          font-size: 11px;
-          font-weight: 900;
-          overflow-wrap: anywhere;
-        }
-        .appearance-live-preview.storefront-bold .preview-shell {
-          background: var(--preview-ink);
-          color: #fff;
-        }
-        .appearance-live-preview.storefront-elegant .preview-shell,
-        .appearance-live-preview.storefront-elegant .preview-logo { border-radius: 0; }
-          .appearance-live-preview.storefront-minimal .preview-shell {
-          box-shadow: none;
-          background: transparent;
-          padding-left: 0;
-          padding-right: 0;
-        }
-        .preview-nav {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
           gap: 10px;
-          margin-bottom: 18px;
-          min-width: 0;
         }
-        .preview-brand {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          min-width: 0;
-        }
-        .preview-logo {
-          width: 44px;
-          height: 44px;
-          border-radius: 8px;
-          background: var(--preview-accent);
-          display: grid;
-          place-items: center;
-          color: var(--preview-accent-text);
-          font-weight: 900;
-          overflow: hidden;
-          flex: 0 0 auto;
-        }
-        .preview-logo img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-logo {
-          width: 34px;
-          height: 34px;
-          border-radius: 9px;
-          background: #C6952F;
-          color: #231a02;
-          font-family: Georgia, serif;
-        }
-        .preview-nav strong {
-          display: block;
-          font-size: 14px;
-          font-weight: 900;
-          overflow-wrap: anywhere;
-        }
-        .preview-nav small {
-          display: block;
-          color: color-mix(in srgb, currentColor 62%, transparent);
-          font-size: 11px;
-          margin-top: 2px;
-        }
-        .preview-links {
-          display: none;
-          gap: 8px;
-          flex: 1;
-          justify-content: center;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-links {
-          display: flex;
-        }
-        .preview-links span {
-          width: clamp(22px, 4vw, 42px);
-          height: 5px;
-          border-radius: 999px;
-          background: color-mix(in srgb, var(--preview-ink) 22%, transparent);
-        }
-        .preview-actions {
-          display: none;
-          gap: 6px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-actions {
-          display: flex;
-        }
-        .preview-actions i {
-          width: 20px;
-          height: 20px;
-          border-radius: 999px;
-          border: 1px solid color-mix(in srgb, var(--preview-ink) 18%, transparent);
-          background: rgba(255,255,255,.45);
-        }
-        .preview-hero {
-          border-radius: 8px;
-          border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-          padding: 18px;
-          background: rgba(255,255,255,.55);
-          background-position: center;
-          background-size: cover;
-          display: grid;
-          gap: 16px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-hero {
-          grid-template-columns: minmax(0, .95fr) minmax(130px, .85fr);
-          align-items: center;
-          border: 0;
-          background: transparent;
-          padding: 10px 0 18px;
-        }
-        .appearance-live-preview.storefront-bold .preview-hero {
-          border-color: rgba(255,255,255,.14);
-          background: rgba(255,255,255,.06);
-        }
-        .preview-hero.has-banner {
-          border-color: rgba(255,255,255,.18);
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-hero.has-banner {
-          color: #16150F;
-        }
-        .preview-hero span {
-          display: inline-flex;
-          width: fit-content;
-          border-radius: 999px;
-          background: var(--preview-accent);
-          color: var(--preview-accent-text);
-          padding: 6px 9px;
-          font-size: 10px;
-          font-weight: 900;
-          text-transform: uppercase;
-          letter-spacing: .08em;
-          margin-bottom: 10px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-hero-copy > span {
-          background: transparent;
-          color: #1F3D2B;
-          padding: 0;
-          border-radius: 0;
-          font-size: 9px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-hero-copy > span::before {
-          content: "";
-          width: 16px;
-          height: 1px;
-          background: #C6952F;
-          display: inline-block;
-          margin-right: 7px;
-          vertical-align: middle;
-        }
-        .preview-hero h4 {
+        .preview-hint {
           margin: 0;
-          font-size: clamp(24px, 4vw, 36px);
-          line-height: .98;
-          letter-spacing: 0;
-          overflow-wrap: anywhere;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-hero h4 {
-          font-family: Georgia, serif;
-          font-weight: 600;
-          font-size: clamp(26px, 4vw, 42px);
-          line-height: 1.03;
-        }
-        .preview-hero p {
-          margin: 10px 0 0;
-          color: color-mix(in srgb, currentColor 66%, transparent);
-          font-size: 13px;
+          color: var(--slate);
+          font-size: 12.5px;
           line-height: 1.5;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-hero p {
-          color: #625A49;
-          max-width: 280px;
-        }
-        .preview-hero button {
-          margin-top: 14px;
-          border: 0;
-          border-radius: 999px;
-          background: var(--preview-button);
-          color: var(--preview-button-text);
-          padding: 9px 13px;
-          font: inherit;
-          font-size: 12px;
-          font-weight: 900;
-        }
-        .preview-hero.has-banner p {
-          color: color-mix(in srgb, currentColor 66%, transparent);
-        }
-        .preview-visual {
-          display: none;
-          position: relative;
-          aspect-ratio: 1 / 1;
-          min-height: 160px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-visual {
-          display: block;
-        }
-        .preview-frame {
-          position: absolute;
-          overflow: hidden;
-          background: #F1ECE1;
-          box-shadow: 0 18px 34px -18px rgba(22,21,15,.34);
-        }
-        .preview-frame.main {
-          width: 76%;
-          height: 82%;
-          top: 0;
-          left: 0;
-          border-radius: 18px;
-        }
-        .preview-frame.small {
-          width: 46%;
-          height: 52%;
-          right: 0;
-          bottom: 0;
-          border: 5px solid #FAF7F1;
-          border-radius: 16px;
-        }
-        .preview-frame img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-        .preview-float {
-          position: absolute;
-          top: 8px;
-          right: 0;
-          border-radius: 10px;
-          background: #fff;
-          color: #1F3D2B;
-          padding: 7px 9px;
-          font-size: 11px;
-          font-weight: 900;
-          box-shadow: 0 12px 26px -16px rgba(22,21,15,.42);
-        }
-        .preview-benefits {
-          display: none;
-          border-top: 1px solid #E7E0D2;
-          border-bottom: 1px solid #E7E0D2;
-          background: #F1ECE1;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px;
-          padding: 10px;
-          margin: 4px -16px 16px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-benefits {
-          display: grid;
-        }
-        .preview-benefits span {
-          height: 7px;
-          border-radius: 999px;
-          background: color-mix(in srgb, #16150F 24%, transparent);
-        }
-        .preview-product-strip {
-          display: none;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px;
-        }
-        .appearance-live-preview.storefront-oakmoss .preview-product-strip {
-          display: grid;
-        }
-        .preview-product {
-          min-width: 0;
-        }
-        .preview-product::before {
-          content: "";
-          display: block;
-          aspect-ratio: 4 / 5;
-          border-radius: 14px;
-          background: #F1ECE1;
-        }
-        .preview-product:has(img)::before {
-          display: none;
-        }
-        .preview-product img {
-          width: 100%;
-          aspect-ratio: 4 / 5;
-          object-fit: cover;
-          border-radius: 14px;
-          display: block;
-          background: #F1ECE1;
-        }
-        .preview-product b,
-        .preview-product span {
-          display: block;
-          border-radius: 999px;
-          background: color-mix(in srgb, #16150F 20%, transparent);
-        }
-        .preview-product b {
-          width: 78%;
-          height: 7px;
-          margin-top: 8px;
-        }
-        .preview-product span {
-          width: 46%;
-          height: 6px;
-          margin-top: 5px;
         }
         .orders-list { display: grid; gap: 10px; }
         .order-row {
@@ -2320,6 +1997,82 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           display: block;
         }
         .image-drop.has-image { border-style: solid; background: #fff; }
+        .image-drop-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+          gap: 10px;
+        }
+        .image-tile {
+          position: relative;
+          aspect-ratio: 1 / 1;
+          border-radius: 8px;
+          overflow: hidden;
+          background: rgba(25,35,40,.03);
+        }
+        .image-tile img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .image-tile-cover-badge {
+          position: absolute;
+          bottom: 6px;
+          left: 6px;
+          background: var(--signal);
+          color: var(--ink);
+          font-size: 10px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: .04em;
+          padding: 3px 7px;
+          border-radius: 999px;
+        }
+        .image-tile-remove {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          border: 0;
+          background: rgba(15,21,24,.72);
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+        }
+        .image-tile-remove:hover { background: #9d2525; }
+        .image-tile-add {
+          border: 1.5px dashed rgba(25,35,40,.18);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          color: var(--slate);
+          font-size: 11px;
+          font-weight: 800;
+          cursor: pointer;
+          text-align: center;
+        }
+        .image-tile-add input { display: none; }
+        .image-tile-add:hover { border-color: var(--slate); color: var(--ink); }
+        .product-card-media {
+          position: relative;
+        }
+        .product-card-photo-count {
+          position: absolute;
+          bottom: 8px;
+          right: 8px;
+          background: rgba(15,21,24,.72);
+          color: #fff;
+          font-size: 11px;
+          font-weight: 800;
+          padding: 3px 8px;
+          border-radius: 999px;
+        }
         .image-help {
           margin: -6px 0 0;
           color: var(--slate);

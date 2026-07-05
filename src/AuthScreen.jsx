@@ -1,5 +1,12 @@
-import { useState, useEffect } from 'react';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { useEffect, useRef, useState } from 'react';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+} from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
@@ -69,6 +76,21 @@ const IconArrow = (p) => (
   </IconBase>
 );
 
+const IconArrowLeft = (p) => (
+  <IconBase {...p}>
+    <path d="M19 12H5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    <path d="m11 18-6-6 6-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+  </IconBase>
+);
+
+const IconAlert = (p) => (
+  <IconBase {...p}>
+    <path d="M12 3.5 21 19.5H3L12 3.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    <path d="M12 9.5v4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="12" cy="17" r=".9" fill="currentColor" />
+  </IconBase>
+);
+
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 4000);
@@ -83,26 +105,71 @@ const Toast = ({ message, type, onClose }) => {
         {type === 'info' && <IconEnvelope size={20} />}
       </span>
       <span className="toast-message">{message}</span>
-      <button className="toast-close" onClick={onClose}>
+      <button className="toast-close" onClick={onClose} aria-label="Dismiss">
         <IconClose size={16} />
       </button>
     </div>
   );
 };
 
+const featureRows = [
+  'A pro website + store in minutes — no code, no designer',
+  'Delivery that just works, with tracking for your customers',
+  'Targeted ads that bring real buyers, not just views',
+];
+
+const testimonial = {
+  quote: "I went from a scattered WhatsApp catalogue to a real online store in one afternoon. My first week, I made more sales than my whole previous month.",
+  name: 'Business Owner',
+  meta: 'Fashion · Osogbo',
+};
+
+function getPasswordStrength(password) {
+  if (!password) return { score: 0, label: '' };
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+  const capped = Math.min(score, 4);
+  const labels = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong'];
+  return { score: capped, label: labels[capped] };
+}
+
+function validateEmail(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return 'Email is required';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return 'Enter a valid email address';
+  return '';
+}
+
 export default function AuthScreen({ initialMode = 'login', onSuccess }) {
   const [isLogin, setIsLogin] = useState(initialMode === 'login');
+  const [showReset, setShowReset] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [justSucceeded, setJustSucceeded] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSending, setResetSending] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const firstFieldRef = useRef(null);
+
+  useEffect(() => {
+    firstFieldRef.current?.focus();
+  }, [isLogin, showReset]);
 
   const addToast = (message, type = 'info') => {
-    const id = Date.now();
+    const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
   };
 
@@ -110,25 +177,58 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
+  const setFieldError = (field, message) => {
+    setFieldErrors((prev) => ({ ...prev, [field]: message }));
+  };
+
+  const revalidateIfAttempted = (field, value, nextValues) => {
+    if (!submitAttempted) return;
+    const values = { email, password, confirmPassword, firstName, lastName, ...nextValues };
+    if (field === 'email') setFieldError('email', validateEmail(value));
+    if (field === 'firstName') setFieldError('firstName', value.trim() ? '' : 'First name is required');
+    if (field === 'lastName') setFieldError('lastName', value.trim() ? '' : 'Last name is required');
+    if (field === 'password') {
+      setFieldError('password', value.length >= 6 ? '' : 'Use at least 6 characters');
+      if (!isLogin && values.confirmPassword) {
+        setFieldError('confirmPassword', values.confirmPassword === value ? '' : 'Passwords do not match');
+      }
+    }
+    if (field === 'confirmPassword') {
+      setFieldError('confirmPassword', value === values.password ? '' : 'Passwords do not match');
+    }
+  };
+
+  const handleEmailChange = (value) => { setEmail(value); revalidateIfAttempted('email', value); };
+  const handlePasswordChange = (value) => { setPassword(value); revalidateIfAttempted('password', value); };
+  const handleConfirmPasswordChange = (value) => { setConfirmPassword(value); revalidateIfAttempted('confirmPassword', value); };
+  const handleFirstNameChange = (value) => { setFirstName(value); revalidateIfAttempted('firstName', value); };
+  const handleLastNameChange = (value) => { setLastName(value); revalidateIfAttempted('lastName', value); };
+
+  const passwordStrength = !isLogin ? getPasswordStrength(password) : null;
+  const confirmMatches = !isLogin && confirmPassword.length > 0 ? confirmPassword === password : null;
+
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setSubmitAttempted(true);
 
-    if (isLogin) {
-      if (!email || !password) {
-        addToast('Please enter your email and password to continue.', 'error');
-        return;
-      }
-    } else if (!firstName || !lastName || !email || !password || !confirmPassword) {
-      addToast('Please fill in all fields to create your account.', 'error');
-      return;
-    } else if (password !== confirmPassword) {
-      addToast('Passwords do not match. Please try again.', 'error');
-      return;
+    const errors = {
+      email: validateEmail(email),
+      password: password.length >= 6 ? '' : 'Use at least 6 characters',
+    };
+    if (!isLogin) {
+      errors.firstName = firstName.trim() ? '' : 'First name is required';
+      errors.lastName = lastName.trim() ? '' : 'Last name is required';
+      errors.confirmPassword = confirmPassword === password ? '' : 'Passwords do not match';
     }
+
+    setFieldErrors(errors);
+    if (Object.values(errors).some(Boolean)) return;
 
     setLoading(true);
 
     try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+
       if (isLogin) {
         const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
         const user = userCredential.user;
@@ -161,11 +261,13 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
         addToast('Account created! Welcome to Blorbify.', 'success');
       }
 
-      await onSuccess?.(auth.currentUser);
+      setJustSucceeded(true);
+      setTimeout(async () => {
+        await onSuccess?.(auth.currentUser);
+      }, 550);
     } catch (error) {
       const message = error?.message || 'Authentication failed. Please try again.';
       addToast(message.replace('Firebase: ', ''), 'error');
-    } finally {
       setLoading(false);
     }
   };
@@ -173,11 +275,45 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
   const toggleMode = () => {
     setIsLogin(!isLogin);
     setShowPassword(false);
+    setSubmitAttempted(false);
+    setFieldErrors({});
     setEmail('');
     setPassword('');
     setFirstName('');
     setLastName('');
     setConfirmPassword('');
+  };
+
+  const openReset = () => {
+    setResetEmail(email);
+    setResetSent(false);
+    setShowReset(true);
+  };
+
+  const closeReset = () => {
+    setShowReset(false);
+    setResetSent(false);
+  };
+
+  const handleResetSubmit = async (event) => {
+    event.preventDefault();
+    const trimmed = resetEmail.trim();
+    const emailError = validateEmail(trimmed);
+    if (emailError) {
+      addToast(emailError, 'error');
+      return;
+    }
+
+    setResetSending(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmed);
+      setResetSent(true);
+    } catch (error) {
+      const message = error?.message || 'Could not send reset email. Please try again.';
+      addToast(message.replace('Firebase: ', ''), 'error');
+    } finally {
+      setResetSending(false);
+    }
   };
 
   return (
@@ -199,6 +335,7 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           --line-dark: rgba(25,35,40,0.1);
           --radius: 18px;
           --shadow: 0 30px 60px rgba(0,0,0,0.3);
+          --danger: #FF6B6B;
         }
 
         .auth-root {
@@ -214,8 +351,13 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           position: relative;
         }
 
-        .auth-root * {
-          box-sizing: border-box;
+        .auth-root * { box-sizing: border-box; }
+
+        @media (prefers-reduced-motion: reduce) {
+          .auth-root *, .auth-root *::before, .auth-root *::after {
+            animation-duration: 0.001ms !important;
+            transition-duration: 0.001ms !important;
+          }
         }
 
         .toast-container {
@@ -238,7 +380,6 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           gap: 14px;
           padding: 16px 20px;
           border-radius: 14px;
-          background: var(--ink-deep);
           border: 1px solid var(--line);
           box-shadow: var(--shadow);
           color: var(--paper);
@@ -249,37 +390,14 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
 
         .toast--success { border-left: 3px solid var(--signal); }
         .toast--success .toast-icon { color: var(--signal); }
-        .toast--error { border-left: 3px solid #FF6B6B; }
-        .toast--error .toast-icon { color: #FF6B6B; }
+        .toast--error { border-left: 3px solid var(--danger); }
+        .toast--error .toast-icon { color: var(--danger); }
         .toast--info { border-left: 3px solid var(--slate); }
         .toast--info .toast-icon { color: var(--slate); }
 
-        .toast-icon {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-
-        .toast-message {
-          font-size: 14px;
-          font-weight: 500;
-          line-height: 1.5;
-          flex: 1;
-        }
-
-        .toast-close {
-          background: none;
-          border: none;
-          color: var(--slate);
-          cursor: pointer;
-          padding: 4px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: color 0.2s;
-          flex-shrink: 0;
-        }
+        .toast-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .toast-message { font-size: 14px; font-weight: 500; line-height: 1.5; flex: 1; }
+        .toast-close { background: none; border: none; color: var(--slate); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.2s; flex-shrink: 0; }
         .toast-close:hover { color: var(--paper); }
 
         @keyframes toastIn {
@@ -287,104 +405,214 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           100% { opacity: 1; transform: translateX(0) scale(1); }
         }
 
-        .auth-card {
+        /* -------- Shell: two-column on desktop -------- */
+        .auth-shell {
           width: 100%;
-          max-width: 460px;
+          max-width: 1000px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          border-radius: 28px;
+          overflow: hidden;
+          box-shadow: var(--shadow);
           background: var(--ink-deep);
           border: 1px solid var(--line);
-          border-radius: 24px;
-          padding: 44px 40px 40px;
-          box-shadow: var(--shadow);
+        }
+
+        /* -------- Brand / trust panel -------- */
+        .auth-brand {
           position: relative;
+          padding: 48px 40px;
+          display: flex;
+          flex-direction: column;
+          background:
+            radial-gradient(140% 120% at 0% 0%, rgba(175,255,0,0.16) 0%, transparent 55%),
+            radial-gradient(120% 100% at 100% 100%, rgba(175,255,0,0.08) 0%, transparent 60%),
+            linear-gradient(165deg, #16211f 0%, var(--ink) 55%, var(--ink-deep) 100%);
           overflow: hidden;
         }
 
-        .auth-card::before {
+        .auth-brand::before {
           content: '';
           position: absolute;
-          top: -60px;
-          right: -60px;
-          width: 200px;
-          height: 200px;
+          top: -80px;
+          right: -80px;
+          width: 260px;
+          height: 260px;
           border-radius: 50%;
-          background: radial-gradient(circle, rgba(175,255,0,0.08) 0%, transparent 70%);
-          pointer-events: none;
+          background: radial-gradient(circle, rgba(175,255,0,0.14) 0%, transparent 70%);
+          animation: floatGlow 9s ease-in-out infinite;
         }
 
-        .auth-card::after {
-          content: '';
-          position: absolute;
-          bottom: -100px;
-          left: -100px;
-          width: 250px;
-          height: 250px;
-          border-radius: 50%;
-          background: radial-gradient(circle, rgba(175,255,0,0.04) 0%, transparent 70%);
-          pointer-events: none;
+        @keyframes floatGlow {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50% { transform: translate(-16px, 18px) scale(1.08); }
         }
 
-        .auth-header {
-          text-align: center;
-          margin-bottom: 34px;
-          position: relative;
-          z-index: 1;
-        }
-
-        .auth-logo {
+        .auth-brand-logo {
           display: inline-flex;
           align-items: center;
           gap: 10px;
           font-weight: 800;
-          font-size: 24px;
+          font-size: 22px;
           color: var(--paper);
           letter-spacing: -0.02em;
-          margin-bottom: 8px;
-          text-decoration: none;
-        }
-
-        .auth-logo-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 4px;
-          background: var(--signal);
-          box-shadow: 0 0 20px rgba(175,255,0,0.5);
-        }
-
-        .auth-title {
-          color: var(--paper);
-          font-size: 28px;
-          font-weight: 800;
-          letter-spacing: -0.02em;
-          margin-top: 18px;
-          line-height: 1.2;
-        }
-
-        .auth-title em {
-          font-style: normal;
-          color: var(--signal);
-        }
-
-        .auth-sub {
-          color: var(--slate);
-          font-size: 15px;
-          margin-top: 8px;
-          font-weight: 400;
-        }
-
-        /* -------- Form -------- */
-        .auth-form {
           position: relative;
           z-index: 1;
         }
 
-        .form-group {
-          margin-bottom: 18px;
+        .auth-brand-headline {
+          position: relative;
+          z-index: 1;
+          color: var(--paper);
+          font-size: clamp(26px, 3vw, 32px);
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          line-height: 1.2;
+          margin: 40px 0 28px;
         }
+
+        .auth-brand-headline em {
+          font-style: normal;
+          color: var(--signal);
+        }
+
+        .auth-features {
+          position: relative;
+          z-index: 1;
+          display: grid;
+          gap: 16px;
+          margin-bottom: auto;
+        }
+
+        .auth-feature-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          color: var(--paper-dim);
+          font-size: 14px;
+          line-height: 1.5;
+        }
+
+        .auth-feature-check {
+          flex-shrink: 0;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: rgba(175,255,0,0.14);
+          color: var(--signal);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 1px;
+        }
+
+        .auth-testimonial {
+          position: relative;
+          z-index: 1;
+          margin-top: 36px;
+          padding: 20px;
+          border-radius: 16px;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid var(--line);
+        }
+
+        .auth-testimonial p {
+          color: var(--paper);
+          font-size: 13.5px;
+          line-height: 1.65;
+          margin: 0 0 12px;
+          font-style: italic;
+        }
+
+        .auth-testimonial-meta {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .auth-testimonial-avatar {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          background: var(--signal);
+          color: var(--ink);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+          font-size: 13px;
+          flex-shrink: 0;
+        }
+
+        .auth-testimonial-name { color: var(--paper); font-size: 12.5px; font-weight: 700; }
+        .auth-testimonial-sub { color: var(--slate); font-size: 11.5px; }
+
+        /* -------- Form panel -------- */
+        .auth-form-panel {
+          padding: 48px 44px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          position: relative;
+        }
+
+        .auth-header { margin-bottom: 30px; }
+
+        .auth-title {
+          color: var(--paper);
+          font-size: 27px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          line-height: 1.2;
+          margin: 0;
+        }
+
+        .auth-title em { font-style: normal; color: var(--signal); }
+
+        .auth-sub {
+          color: var(--slate);
+          font-size: 14.5px;
+          margin-top: 8px;
+          font-weight: 400;
+          line-height: 1.5;
+        }
+
+        .auth-back-link {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          color: var(--slate);
+          background: none;
+          border: none;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          padding: 0;
+          margin-bottom: 18px;
+          transition: color 0.2s;
+        }
+        .auth-back-link:hover { color: var(--paper); }
+
+        /* -------- Mode transition -------- */
+        .auth-form-fade {
+          animation: formIn 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes formIn {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .auth-form { position: relative; }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+        .form-group { margin-bottom: 16px; }
 
         .form-label {
           display: block;
           color: var(--slate);
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 600;
           margin-bottom: 6px;
           font-family: 'JetBrains Mono', monospace;
@@ -407,13 +635,42 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           box-shadow: 0 0 0 4px rgba(175, 255, 0, 0.1);
         }
 
-        .input-icon {
-          color: var(--slate);
-          padding: 0 0 0 16px;
+        .input-wrap.has-error {
+          border-color: var(--danger);
+          animation: shake 0.32s ease;
+        }
+        .input-wrap.has-error:focus-within {
+          box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.12);
+        }
+
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-5px); }
+          75% { transform: translateX(5px); }
+        }
+
+        .field-error {
           display: flex;
           align-items: center;
-          flex-shrink: 0;
+          gap: 6px;
+          color: var(--danger);
+          font-size: 12px;
+          font-weight: 600;
+          margin-top: 6px;
         }
+
+        .field-match {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          margin-top: 6px;
+        }
+        .field-match.ok { color: var(--signal); }
+        .field-match.no { color: var(--danger); }
+
+        .input-icon { color: var(--slate); padding: 0 0 0 16px; display: flex; align-items: center; flex-shrink: 0; }
 
         .input-wrap input {
           width: 100%;
@@ -427,10 +684,7 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           outline: none;
         }
 
-        .input-wrap input::placeholder {
-          color: var(--slate-dark);
-          font-weight: 400;
-        }
+        .input-wrap input::placeholder { color: var(--slate-dark); font-weight: 400; }
 
         .input-wrap input:-webkit-autofill {
           -webkit-box-shadow: 0 0 0 1000px var(--ink-soft) inset !important;
@@ -449,8 +703,39 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           transition: color 0.2s;
           flex-shrink: 0;
         }
-        .input-toggle:hover {
-          color: var(--paper);
+        .input-toggle:hover { color: var(--paper); }
+
+        .password-strength {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 8px;
+        }
+
+        .password-strength-track {
+          flex: 1;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 4px;
+        }
+
+        .password-strength-seg {
+          height: 4px;
+          border-radius: 999px;
+          background: var(--line-dark);
+          background: rgba(255,255,255,0.08);
+          transition: background 0.2s ease;
+        }
+        .password-strength-seg.filled.tier-1 { background: var(--danger); }
+        .password-strength-seg.filled.tier-2 { background: #FFB020; }
+        .password-strength-seg.filled.tier-3 { background: #8FDD00; }
+        .password-strength-seg.filled.tier-4 { background: var(--signal); }
+
+        .password-strength-label {
+          font-size: 11.5px;
+          font-weight: 700;
+          color: var(--slate);
+          white-space: nowrap;
         }
 
         .form-options {
@@ -500,16 +785,19 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           font-weight: 700;
         }
 
-        .form-options a {
+        .form-options button.link {
+          background: none;
+          border: none;
           color: var(--signal);
           text-decoration: none;
           font-size: 13px;
           font-weight: 600;
+          cursor: pointer;
+          padding: 0;
           transition: opacity 0.2s;
+          font-family: 'Raleway', sans-serif;
         }
-        .form-options a:hover {
-          opacity: 0.7;
-        }
+        .form-options button.link:hover { opacity: 0.7; }
 
         .btn-auth {
           width: 100%;
@@ -530,19 +818,10 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           position: relative;
         }
 
-        .btn-auth:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 16px 32px rgba(175, 255, 0, 0.25);
-        }
-
-        .btn-auth:active:not(:disabled) {
-          transform: scale(0.98);
-        }
-
-        .btn-auth:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
+        .btn-auth:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 16px 32px rgba(175, 255, 0, 0.25); }
+        .btn-auth:active:not(:disabled) { transform: scale(0.98); }
+        .btn-auth:disabled { opacity: 0.75; cursor: not-allowed; }
+        .btn-auth.succeeded { background: var(--signal); }
 
         .btn-auth .spinner {
           width: 22px;
@@ -553,9 +832,7 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           animation: spin 0.7s linear infinite;
         }
 
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
         .auth-footer {
           text-align: center;
@@ -577,10 +854,7 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           transition: opacity 0.2s;
           padding: 0 4px;
         }
-
-        .auth-footer button:hover {
-          opacity: 0.7;
-        }
+        .auth-footer button:hover { opacity: 0.7; }
 
         .auth-divider {
           display: flex;
@@ -593,18 +867,9 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           letter-spacing: 0.06em;
         }
 
-        .auth-divider::before,
-        .auth-divider::after {
-          content: '';
-          flex: 1;
-          height: 1px;
-          background: var(--line);
-        }
+        .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
-        .social-btns {
-          display: flex;
-          gap: 12px;
-        }
+        .social-btns { display: flex; gap: 12px; }
 
         .social-btn {
           flex: 1;
@@ -624,269 +889,313 @@ export default function AuthScreen({ initialMode = 'login', onSuccess }) {
           transition: all 0.25s ease;
         }
 
-        .social-btn:hover {
-          border-color: var(--slate);
-          color: var(--paper);
-          background: var(--ink);
-        }
+        .social-btn:hover { border-color: var(--slate); color: var(--paper); background: var(--ink); }
+        .social-btn .social-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
 
-        .social-btn .social-icon {
-          width: 20px;
-          height: 20px;
+        /* -------- Reset password mini flow -------- */
+        .reset-success {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          gap: 14px;
+          padding: 12px 0 4px;
+        }
+        .reset-success-badge {
+          width: 56px;
+          height: 56px;
+          border-radius: 50%;
+          background: rgba(175,255,0,0.14);
+          color: var(--signal);
           display: flex;
           align-items: center;
           justify-content: center;
         }
+        .reset-success p { color: var(--slate); font-size: 14px; line-height: 1.6; margin: 0; }
+        .reset-success strong { color: var(--paper); }
 
         /* -------- Responsive -------- */
+        @media (max-width: 900px) {
+          .auth-shell { grid-template-columns: 1fr; max-width: 460px; }
+          .auth-brand { display: none; }
+          .auth-form-panel { padding: 44px 40px 40px; }
+        }
+
         @media (max-width: 520px) {
-          .auth-root {
-            padding: 16px;
-          }
-
-          .auth-card {
-            padding: 32px 22px 28px;
-            border-radius: 20px;
-          }
-
-          .auth-title {
-            font-size: 22px;
-          }
-
-          .auth-logo {
-            font-size: 20px;
-          }
-
-          .input-wrap input {
-            padding: 14px 14px 14px 10px;
-            font-size: 14px;
-          }
-
-          .input-icon {
-            padding: 0 0 0 12px;
-          }
-
-          .input-toggle {
-            padding: 0 12px 0 0;
-          }
-
-          .btn-auth {
-            padding: 16px;
-            font-size: 15px;
-          }
-
-          .form-options {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 10px;
-          }
-
-          .social-btns {
-            flex-direction: column;
-          }
-
-          .toast-container {
-            top: 12px;
-            right: 12px;
-            left: 12px;
-            max-width: none;
-          }
-
-          .toast {
-            padding: 14px 16px;
-            font-size: 13px;
-          }
+          .auth-root { padding: 16px; }
+          .auth-form-panel { padding: 32px 22px 28px; }
+          .auth-shell { border-radius: 20px; }
+          .auth-title { font-size: 22px; }
+          .form-row { grid-template-columns: 1fr; gap: 0; }
+          .input-wrap input { padding: 14px 14px 14px 10px; font-size: 14px; }
+          .input-icon { padding: 0 0 0 12px; }
+          .input-toggle { padding: 0 12px 0 0; }
+          .btn-auth { padding: 16px; font-size: 15px; }
+          .form-options { flex-direction: column; align-items: flex-start; gap: 10px; }
+          .social-btns { flex-direction: column; }
+          .toast-container { top: 12px; right: 12px; left: 12px; max-width: none; }
+          .toast { padding: 14px 16px; font-size: 13px; }
         }
 
         @media (max-width: 380px) {
-          .auth-card {
-            padding: 24px 16px 20px;
-          }
-
-          .auth-title {
-            font-size: 19px;
-          }
-
-          .auth-sub {
-            font-size: 13px;
-          }
+          .auth-form-panel { padding: 24px 16px 20px; }
+          .auth-title { font-size: 19px; }
+          .auth-sub { font-size: 13px; }
         }
 
         @media (min-height: 800px) {
-          .auth-root {
-            padding: 40px;
-          }
+          .auth-root { padding: 40px; }
         }
       `}</style>
 
       {/* Toast Container */}
       <div className="toast-container">
         {toasts.map((toast) => (
-          <Toast
-            key={toast.id}
-            message={toast.message}
-            type={toast.type}
-            onClose={() => removeToast(toast.id)}
-          />
+          <Toast key={toast.id} message={toast.message} type={toast.type} onClose={() => removeToast(toast.id)} />
         ))}
       </div>
 
-      {/* Auth Card */}
-      <div className="auth-card">
-        <div className="auth-header">
-          <div className="auth-logo">
-            <span className="auth-logo-dot" />
+      <div className="auth-shell">
+        {/* Brand / trust panel */}
+        <div className="auth-brand">
+          <div className="auth-brand-logo">
+            <span style={{ width: 12, height: 12, borderRadius: 4, background: 'var(--signal)', boxShadow: '0 0 20px rgba(175,255,0,0.5)' }} />
             Blorbify
           </div>
-          <h1 className="auth-title">
-            {isLogin ? 'Welcome back' : 'Create your <em>store</em>'}
-          </h1>
-          <p className="auth-sub">
-            {isLogin
-              ? 'Sign in to manage your store and grow your business.'
-              : 'Start selling online in minutes — no tech skills needed.'}
-          </p>
-        </div>
-
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {!isLogin && (
-            <>
-              <div className="form-group">
-                <label className="form-label">First Name</label>
-                <div className="input-wrap">
-                  <span className="input-icon"><IconUser size={18} /></span>
-                  <input
-                    type="text"
-                    placeholder="Chioma"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    required={!isLogin}
-                  />
-                </div>
+          <h2 className="auth-brand-headline">
+            Your business deserves to look this <em>good</em> online.
+          </h2>
+          <div className="auth-features">
+            {featureRows.map((feature) => (
+              <div className="auth-feature-row" key={feature}>
+                <span className="auth-feature-check"><IconCheck size={13} /></span>
+                {feature}
               </div>
-
-              <div className="form-group">
-                <label className="form-label">Last Name</label>
-                <div className="input-wrap">
-                  <span className="input-icon"><IconUser size={18} /></span>
-                  <input
-                    type="text"
-                    placeholder="Adewale"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    required={!isLogin}
-                  />
-                </div>
+            ))}
+          </div>
+          <div className="auth-testimonial">
+            <p>&ldquo;{testimonial.quote}&rdquo;</p>
+            <div className="auth-testimonial-meta">
+              <span className="auth-testimonial-avatar">{testimonial.name.charAt(0)}</span>
+              <div>
+                <div className="auth-testimonial-name">{testimonial.name}</div>
+                <div className="auth-testimonial-sub">{testimonial.meta}</div>
               </div>
-            </>
-          )}
-
-          <div className="form-group">
-            <label className="form-label">Email Address</label>
-            <div className="input-wrap">
-              <span className="input-icon"><IconEnvelope size={18} /></span>
-              <input
-                type="email"
-                placeholder="hello@yourbusiness.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
             </div>
           </div>
+        </div>
 
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <div className="input-wrap">
-              <span className="input-icon"><IconLock size={18} /></span>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button
-                type="button"
-                className="input-toggle"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <IconEyeSlash size={18} /> : <IconEye size={18} />}
+        {/* Form panel */}
+        <div className="auth-form-panel">
+          {showReset ? (
+            <div className="auth-form-fade" key="reset">
+              <button type="button" className="auth-back-link" onClick={closeReset}>
+                <IconArrowLeft size={15} /> Back to sign in
               </button>
-            </div>
-          </div>
+              <div className="auth-header">
+                <h1 className="auth-title">Reset your password</h1>
+                <p className="auth-sub">Enter your email and we&rsquo;ll send you a link to set a new one.</p>
+              </div>
 
-          {!isLogin && (
-            <div className="form-group">
-              <label className="form-label">Confirm Password</label>
-              <div className="input-wrap">
-                <span className="input-icon"><IconLock size={18} /></span>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Confirm your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required={!isLogin}
-                />
+              {resetSent ? (
+                <div className="reset-success">
+                  <span className="reset-success-badge"><IconCheck size={26} /></span>
+                  <p>Check <strong>{resetEmail.trim()}</strong> for a link to reset your password. It should arrive within a couple of minutes.</p>
+                  <button type="button" className="btn-auth" style={{ marginTop: 8 }} onClick={closeReset}>
+                    Back to sign in
+                  </button>
+                </div>
+              ) : (
+                <form className="auth-form" onSubmit={handleResetSubmit}>
+                  <div className="form-group">
+                    <label className="form-label">Email Address</label>
+                    <div className="input-wrap">
+                      <span className="input-icon"><IconEnvelope size={18} /></span>
+                      <input
+                        ref={firstFieldRef}
+                        type="email"
+                        placeholder="hello@yourbusiness.com"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-auth" disabled={resetSending}>
+                    {resetSending ? (<><span className="spinner" /> Sending link...</>) : 'Send reset link'}
+                  </button>
+                </form>
+              )}
+            </div>
+          ) : (
+            <div className="auth-form-fade" key={isLogin ? 'login' : 'signup'}>
+              <div className="auth-header">
+                <h1 className="auth-title">
+                  {isLogin ? 'Welcome back' : <>Create your <em>store</em></>}
+                </h1>
+                <p className="auth-sub">
+                  {isLogin
+                    ? 'Sign in to manage your store and grow your business.'
+                    : 'Start selling online in minutes — no tech skills needed.'}
+                </p>
+              </div>
+
+              <form className="auth-form" onSubmit={handleSubmit} noValidate>
+                {!isLogin && (
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">First Name</label>
+                      <div className={`input-wrap ${fieldErrors.firstName ? 'has-error' : ''}`}>
+                        <span className="input-icon"><IconUser size={18} /></span>
+                        <input
+                          ref={firstFieldRef}
+                          type="text"
+                          placeholder="Chioma"
+                          value={firstName}
+                          onChange={(e) => handleFirstNameChange(e.target.value)}
+                        />
+                      </div>
+                      {fieldErrors.firstName && <div className="field-error"><IconAlert size={13} /> {fieldErrors.firstName}</div>}
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Last Name</label>
+                      <div className={`input-wrap ${fieldErrors.lastName ? 'has-error' : ''}`}>
+                        <span className="input-icon"><IconUser size={18} /></span>
+                        <input
+                          type="text"
+                          placeholder="Adewale"
+                          value={lastName}
+                          onChange={(e) => handleLastNameChange(e.target.value)}
+                        />
+                      </div>
+                      {fieldErrors.lastName && <div className="field-error"><IconAlert size={13} /> {fieldErrors.lastName}</div>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label className="form-label">Email Address</label>
+                  <div className={`input-wrap ${fieldErrors.email ? 'has-error' : ''}`}>
+                    <span className="input-icon"><IconEnvelope size={18} /></span>
+                    <input
+                      ref={isLogin ? firstFieldRef : undefined}
+                      type="email"
+                      placeholder="hello@yourbusiness.com"
+                      value={email}
+                      onChange={(e) => handleEmailChange(e.target.value)}
+                    />
+                  </div>
+                  {fieldErrors.email && <div className="field-error"><IconAlert size={13} /> {fieldErrors.email}</div>}
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Password</label>
+                  <div className={`input-wrap ${fieldErrors.password ? 'has-error' : ''}`}>
+                    <span className="input-icon"><IconLock size={18} /></span>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => handlePasswordChange(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="input-toggle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <IconEyeSlash size={18} /> : <IconEye size={18} />}
+                    </button>
+                  </div>
+                  {fieldErrors.password && <div className="field-error"><IconAlert size={13} /> {fieldErrors.password}</div>}
+                  {!isLogin && password.length > 0 && (
+                    <div className="password-strength">
+                      <div className="password-strength-track">
+                        {[1, 2, 3, 4].map((tier) => (
+                          <div key={tier} className={`password-strength-seg ${passwordStrength.score >= tier ? `filled tier-${tier}` : ''}`} />
+                        ))}
+                      </div>
+                      <span className="password-strength-label">{passwordStrength.label}</span>
+                    </div>
+                  )}
+                </div>
+
+                {!isLogin && (
+                  <div className="form-group">
+                    <label className="form-label">Confirm Password</label>
+                    <div className={`input-wrap ${fieldErrors.confirmPassword ? 'has-error' : ''}`}>
+                      <span className="input-icon"><IconLock size={18} /></span>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Confirm your password"
+                        value={confirmPassword}
+                        onChange={(e) => handleConfirmPasswordChange(e.target.value)}
+                      />
+                    </div>
+                    {fieldErrors.confirmPassword ? (
+                      <div className="field-error"><IconAlert size={13} /> {fieldErrors.confirmPassword}</div>
+                    ) : confirmMatches !== null && (
+                      <div className={`field-match ${confirmMatches ? 'ok' : 'no'}`}>
+                        {confirmMatches ? <IconCheck size={13} /> : <IconClose size={13} />} {confirmMatches ? 'Passwords match' : 'Passwords do not match yet'}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isLogin && (
+                  <div className="form-options">
+                    <label>
+                      <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
+                      Remember me
+                    </label>
+                    <button type="button" className="link" onClick={openReset}>Forgot password?</button>
+                  </div>
+                )}
+
+                <button type="submit" className={`btn-auth ${justSucceeded ? 'succeeded' : ''}`} disabled={loading}>
+                  {justSucceeded ? (
+                    <><IconCheck size={20} /> {isLogin ? 'Signed in!' : 'Account created!'}</>
+                  ) : loading ? (
+                    <><span className="spinner" /> {isLogin ? 'Signing in...' : 'Creating account...'}</>
+                  ) : (
+                    <>{isLogin ? 'Sign in' : 'Create your store'}<IconArrow size={18} /></>
+                  )}
+                </button>
+              </form>
+
+              <div className="auth-divider">OR CONTINUE WITH</div>
+
+              <div className="social-btns">
+                <button type="button" className="social-btn" onClick={() => addToast('Google sign-in coming soon!', 'info')}>
+                  <span className="social-icon">
+                    <svg width="18" height="18" viewBox="0 0 48 48">
+                      <path fill="#EA4335" d="M24 9.5c3.5 0 6.2 1.2 8.2 3.1l6.1-6.1C34.6 3.2 29.8 1 24 1 14.8 1 7 6.6 3.4 14.4l7.1 5.5C12.4 14.2 17.6 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.6 24.6c0-1.5-.1-3-.4-4.5H24v8.5h12.8c-.6 3-2.2 5.6-4.7 7.3l7.1 5.5c4.2-3.9 6.6-9.6 6.6-16.8z" />
+                      <path fill="#FBBC05" d="M10.5 28.5c-1.1-2.9-1.1-6.1 0-9L3.4 14C1.2 18.4 0 23.4 0 28.5s1.2 10.1 3.4 14.5l7.1-5.5z" />
+                      <path fill="#34A853" d="M24 47c6.8 0 12.5-2.2 16.7-6.1l-7.1-5.5c-2.2 1.5-5 2.4-9.6 2.4-6.4 0-11.6-4.7-13.5-11.1l-7.1 5.5C7 41.4 14.8 47 24 47z" />
+                    </svg>
+                  </span>
+                  Google
+                </button>
+                <button type="button" className="social-btn" onClick={() => addToast('Apple sign-in coming soon!', 'info')}>
+                  <span className="social-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M18.7 12.9c-.1-3.5 2.8-5.2 2.9-5.3-1.6-2.3-4.1-2.6-5-2.7-2.1-.2-4.1 1.2-5.2 1.2s-2.7-1.2-4.5-1.2C5 5 2.6 7.2 2.6 10.5c0 2.9 2.4 7.2 4.6 7.2 1.7 0 2.2-1 4.2-1s2.6 1 4.4 1c1.9 0 3.7-2.5 3.7-3.9zM15.7 4.7c1.3-1.6 1.2-2.9 1.2-3.3-1.1.1-2.5.7-3.3 1.6-.8.9-1.3 2.1-1.2 3.3 1.2.1 2.5-.6 3.3-1.6z" />
+                    </svg>
+                  </span>
+                  Apple
+                </button>
+              </div>
+
+              <div className="auth-footer">
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                <button type="button" onClick={toggleMode}>
+                  {isLogin ? 'Start your free store' : 'Sign in'}
+                </button>
               </div>
             </div>
           )}
-
-          {isLogin && (
-            <div className="form-options">
-              <label>
-                <input type="checkbox" defaultChecked />
-                Remember me
-              </label>
-              <a href="#">Forgot password?</a>
-            </div>
-          )}
-
-          <button type="submit" className="btn-auth" disabled={loading}>
-            {loading ? (
-              <>
-                <span className="spinner" />
-                {isLogin ? 'Signing in...' : 'Creating account...'}
-              </>
-            ) : (
-              <>
-                {isLogin ? 'Sign in' : 'Create your store'}
-                <IconArrow size={18} />
-              </>
-            )}
-          </button>
-        </form>
-
-        <div className="auth-divider">OR CONTINUE WITH</div>
-
-        <div className="social-btns">
-          <button className="social-btn" onClick={() => addToast('Google sign-in coming soon!', 'info')}>
-            <span className="social-icon">
-              <svg width="18" height="18" viewBox="0 0 48 48">
-                <path fill="#EA4335" d="M24 9.5c3.5 0 6.2 1.2 8.2 3.1l6.1-6.1C34.6 3.2 29.8 1 24 1 14.8 1 7 6.6 3.4 14.4l7.1 5.5C12.4 14.2 17.6 9.5 24 9.5z" />
-                <path fill="#4285F4" d="M46.6 24.6c0-1.5-.1-3-.4-4.5H24v8.5h12.8c-.6 3-2.2 5.6-4.7 7.3l7.1 5.5c4.2-3.9 6.6-9.6 6.6-16.8z" />
-                <path fill="#FBBC05" d="M10.5 28.5c-1.1-2.9-1.1-6.1 0-9L3.4 14C1.2 18.4 0 23.4 0 28.5s1.2 10.1 3.4 14.5l7.1-5.5z" />
-                <path fill="#34A853" d="M24 47c6.8 0 12.5-2.2 16.7-6.1l-7.1-5.5c-2.2 1.5-5 2.4-9.6 2.4-6.4 0-11.6-4.7-13.5-11.1l-7.1 5.5C7 41.4 14.8 47 24 47z" />
-              </svg>
-            </span>
-            Google
-          </button>
-          <button className="social-btn" onClick={() => addToast('Apple sign-in coming soon!', 'info')}>
-            <span className="social-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.7 12.9c-.1-3.5 2.8-5.2 2.9-5.3-1.6-2.3-4.1-2.6-5-2.7-2.1-.2-4.1 1.2-5.2 1.2s-2.7-1.2-4.5-1.2C5 5 2.6 7.2 2.6 10.5c0 2.9 2.4 7.2 4.6 7.2 1.7 0 2.2-1 4.2-1s2.6 1 4.4 1c1.9 0 3.7-2.5 3.7-3.9zM15.7 4.7c1.3-1.6 1.2-2.9 1.2-3.3-1.1.1-2.5.7-3.3 1.6-.8.9-1.3 2.1-1.2 3.3 1.2.1 2.5-.6 3.3-1.6z" />
-              </svg>
-            </span>
-            Apple
-          </button>
-        </div>
-
-        <div className="auth-footer">
-          {isLogin ? "Don't have an account? " : "Already have an account? "}
-          <button type="button" onClick={toggleMode}>
-            {isLogin ? 'Start your free store' : 'Sign in'}
-          </button>
         </div>
       </div>
     </div>

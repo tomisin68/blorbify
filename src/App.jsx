@@ -622,7 +622,7 @@ export default function App() {
         /* ---------- PROBLEM ---------- */
         .problem{ background:var(--paper); padding:120px 0 100px; }
         .problem-head{ max-width:680px; }
-        .problem h2{ font-size:38px; line-height:1.15; margin-top:16px; font-weight:800; }
+        .problem h2{ color:var(--ink); font-size:38px; line-height:1.15; margin-top:16px; font-weight:800; }
         .problem-body{ color:var(--slate-dark); font-size:17px; line-height:1.7; margin-top:20px; max-width:640px; }
         .pain-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:52px; }
         .pain-card{
@@ -653,7 +653,7 @@ export default function App() {
         /* ---------- FEATURES ---------- */
         .features{ background:var(--paper); padding:120px 0; }
         .features-head{ max-width:680px; margin-bottom:70px; }
-        .features-head h2{ font-size:38px; margin-top:16px; font-weight:800; line-height:1.15; }
+        .features-head h2{ color:var(--ink); font-size:38px; margin-top:16px; font-weight:800; line-height:1.15; }
         .feature-row{ display:grid; grid-template-columns:1fr 1fr; gap:64px; align-items:center; margin-bottom:96px; }
         .feature-row:last-child{ margin-bottom:0; }
         .feature-row.rev .f-media{ order:2; }
@@ -685,7 +685,7 @@ export default function App() {
         /* ---------- COMPARE ---------- */
         .compare{ background:var(--paper); padding:120px 0; }
         .compare-head{ max-width:640px; margin-bottom:56px; }
-        .compare-head h2{ font-size:38px; margin-top:16px; font-weight:800; line-height:1.15; }
+        .compare-head h2{ color:var(--ink); font-size:38px; margin-top:16px; font-weight:800; line-height:1.15; }
         .compare-table{ background:var(--ink); border-radius:22px; overflow:hidden; }
         .cmp-row{ display:grid; grid-template-columns:1.2fr 1fr 1fr; }
         .cmp-row.head{ background:var(--ink-deep); }
@@ -738,7 +738,7 @@ export default function App() {
         /* ---------- FAQ ---------- */
         .faq{ background:var(--paper); padding:110px 0; }
         .faq-inner{ display:grid; grid-template-columns:0.8fr 1.2fr; gap:60px; }
-        .faq-head h2{ font-size:36px; font-weight:800; margin-top:16px; line-height:1.18; }
+        .faq-head h2{ color:var(--ink); font-size:36px; font-weight:800; margin-top:16px; line-height:1.18; }
         .faq-list{ display:flex; flex-direction:column; }
         .faq-item{ border-bottom:1px solid rgba(25,35,40,0.12); padding:22px 0; cursor:pointer; }
         .faq-q{ display:flex; align-items:center; justify-content:space-between; gap:20px; }
@@ -1052,7 +1052,7 @@ export default function App() {
         <div className="wrap">
           <Reveal>
             <Eyebrow>Trusted by businesses like yours</Eyebrow>
-            <h2 style={{ fontSize: 32, marginTop: 16, fontWeight: 800 }}>Real businesses. Real sales.</h2>
+            <h2 style={{ color: 'var(--ink)', fontSize: 32, marginTop: 16, fontWeight: 800 }}>Real businesses. Real sales.</h2>
           </Reveal>
           <div className="testi-grid">
             {testimonials.map((t, i) => (
