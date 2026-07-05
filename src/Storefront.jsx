@@ -83,28 +83,26 @@ export default function Storefront({ slug }) {
       : []
   ), [store]);
 
-  // Auto-open the product a shared link points to, once the store has loaded. Only runs once —
-  // afterwards the URL is driven by the effect below, not the other way around.
+  // Reconciles the open product modal with the URL's `product` param. While the store is still
+  // loading the URL is left untouched (so a shared link survives the load). Once loaded, the first
+  // pass tries to auto-open the product the URL points to; every pass after that keeps the URL in
+  // sync with whichever product modal is open, using replace so open/close doesn't spam history.
   useEffect(() => {
-    if (appliedInitialProductRef.current) return;
     if (loading) return;
-    if (!store) return;
 
-    appliedInitialProductRef.current = true;
-    const productId = searchParams.get('product');
-    if (!productId) return;
-
-    const match = products.find((product) => productKey(product) === productId);
-    if (match) {
-      setSelectedProduct(match);
-    } else {
-      console.warn(`Storefront: product "${productId}" from the shared link was not found in this store's catalog.`);
+    if (!appliedInitialProductRef.current) {
+      appliedInitialProductRef.current = true;
+      const initialProductId = searchParams.get('product');
+      if (initialProductId && !selectedProduct) {
+        const match = products.find((product) => productKey(product) === initialProductId);
+        if (match) {
+          setSelectedProduct(match);
+          return;
+        }
+        console.warn(`Storefront: product "${initialProductId}" from the shared link was not found in this store's catalog.`);
+      }
     }
-  }, [loading, store, products, searchParams]);
 
-  // Keep the URL in sync with the open product modal, using replace so opening/closing products
-  // doesn't clutter browser history.
-  useEffect(() => {
     const productId = selectedProduct ? productKey(selectedProduct) : null;
     const currentParam = searchParams.get('product');
     if (productId === currentParam) return;
@@ -116,7 +114,7 @@ export default function Storefront({ slug }) {
       nextParams.delete('product');
     }
     setSearchParams(nextParams, { replace: true });
-  }, [selectedProduct, searchParams, setSearchParams]);
+  }, [loading, selectedProduct, products, searchParams, setSearchParams]);
 
   const productShareUrl = selectedProduct
     ? `${window.location.origin}/${store?.storeSlug || slug}?${new URLSearchParams({ product: productKey(selectedProduct) }).toString()}`
