@@ -1669,6 +1669,9 @@ export default function Dashboard({ user, userProfile, onLogout }) {
           gap: 18px;
           align-items: start;
         }
+        .appearance-editor.preview-collapsed {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
         .appearance-controls {
           display: grid;
           gap: 16px;
