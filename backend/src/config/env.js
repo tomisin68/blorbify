@@ -39,7 +39,6 @@ export const env = {
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || '',
   paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || 'https://api.paystack.co',
-  paystackCallbackUrl: process.env.PAYSTACK_CALLBACK_URL || '',
   blorbifyDefaultPlatformPercentage: toNumber(process.env.BLORBIFY_DEFAULT_PLATFORM_PERCENTAGE, 10),
   relaySharedSecret: process.env.RELAY_SHARED_SECRET || '',
   firebaseServiceAccount: parseJson(process.env.FIREBASE_SERVICE_ACCOUNT_KEY),
@@ -49,6 +48,8 @@ export const env = {
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   mailFrom: process.env.MAIL_FROM || 'Blorbify <no-reply@blorbify.com>',
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  resendFrom: process.env.RESEND_FROM || '',
 };
 
 export function isProduction() {

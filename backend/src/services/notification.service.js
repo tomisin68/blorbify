@@ -1,4 +1,4 @@
-import { getMailerTransport, isMailerConfigured } from '../config/mailer.js';
+import { getMailerTransport, isMailerConfigured, isResendConfigured, sendResendEmail } from '../config/mailer.js';
 import { adminDb, fieldValue } from '../config/firebaseAdmin.js';
 
 export async function queueNotification(notification) {
@@ -24,41 +24,67 @@ export async function sendEmail({ to, subject, html, text, data = {} }) {
     throw new Error('Email recipient is required.');
   }
 
-  if (!isMailerConfigured()) {
-    const queued = await queueNotification({
-      type: 'email',
-      channel: 'email',
-      recipientEmail: to,
-      subject,
-      message: text || subject,
-      data: { ...data, delivery: 'queued' },
-    });
-
-    return { sent: false, queued: true, notification: queued };
+  if (isResendConfigured()) {
+    const result = await sendResendEmail({ to, subject, html, text });
+    return { sent: true, messageId: result?.id || null };
   }
 
-  const transport = getMailerTransport();
-  const result = await transport.sendMail({
-    from: process.env.MAIL_FROM || 'Blorbify <no-reply@blorbify.com>',
-    to,
+  if (isMailerConfigured()) {
+    const transport = getMailerTransport();
+    const result = await transport.sendMail({
+      from: process.env.MAIL_FROM || 'Blorbify <no-reply@blorbify.com>',
+      to,
+      subject,
+      text,
+      html,
+    });
+
+    return { sent: true, messageId: result.messageId };
+  }
+
+  const queued = await queueNotification({
+    type: 'email',
+    channel: 'email',
+    recipientEmail: to,
     subject,
-    text,
-    html,
+    message: text || subject,
+    data: { ...data, delivery: 'queued' },
   });
 
-  return { sent: true, messageId: result.messageId };
+  return { sent: false, queued: true, notification: queued };
 }
 
 export async function queueWelcomeNotification({ user, subscription }) {
-  return queueNotification({
+  const recipientName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'there';
+  const subject = 'Welcome to Blorbify';
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#192328;">
+      <h2 style="margin:0 0 12px;">Welcome to Blorbify</h2>
+      <p style="margin:0 0 12px;">Hi ${recipientName}, your ${subscription.planName} plan is now active.</p>
+      <p style="margin:0 0 12px;">You can now continue setting up your store, publish products, and start selling online.</p>
+    </div>
+  `;
+  const text = `Welcome to Blorbify\n\nHi ${recipientName}, your ${subscription.planName} plan is now active.\n\nYou can now continue setting up your store and start selling online.`;
+
+  const notification = await queueNotification({
     type: 'welcome',
     channel: 'email',
     recipientEmail: user.email || '',
-    recipientName: [user.firstName, user.lastName].filter(Boolean).join(' ').trim(),
-    subject: 'Welcome to Blorbify',
+    recipientName,
+    subject,
     message: `Your ${subscription.planName} plan is active.`,
     data: { userId: user.userId, subscriptionId: subscription.id },
   });
+
+  if (user.email) {
+    try {
+      await sendEmail({ to: user.email, subject, html, text, data: { userId: user.userId } });
+    } catch (error) {
+      console.error('Welcome email send error:', error.message);
+    }
+  }
+
+  return notification;
 }
 
 export async function queueOrderNotification({ store, order }) {

@@ -12,6 +12,7 @@ import { db } from './firebase';
 import { createStoreSlug, getStoreUrl } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
 import SellerPayoutPanel from './SellerPayoutPanel';
+import BillingPanel from './BillingPanel';
 import {
   colorPresets,
   defaultStoreCopy,
@@ -1259,6 +1260,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     { id: 'orders', label: 'Orders', icon: IconOrders },
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
     { id: 'payouts', label: 'Payouts', icon: IconWallet },
+    { id: 'billing', label: 'Billing', icon: IconWallet },
   ];
 
   if (loading) {
@@ -2691,6 +2693,15 @@ export default function Dashboard({ user, userProfile, onLogout }) {
                 <h3>Seller Payouts</h3>
               </div>
               <SellerPayoutPanel user={user} storeInfo={storeInfo} />
+            </div>
+          )}
+
+          {activeTab === 'billing' && (
+            <div className="content-card full-span">
+              <div className="card-header">
+                <h3>Billing</h3>
+              </div>
+              <BillingPanel user={user} userProfile={userProfile} />
             </div>
           )}
         </section>

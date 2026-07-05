@@ -6,6 +6,7 @@ import AuthScreen from "./AuthScreen.jsx";
 import OnboardingScreen from "./OnboardingScreen.jsx";
 import Dashboard from "./Dashboard.jsx";
 import Storefront from "./Storefront.jsx";
+import PaymentSuccess from "./PaymentSuccess.jsx";
 
 /* ============================================================
    BLORBIFY — Landing Page
@@ -180,13 +181,18 @@ const Eyebrow = ({ children }) => <span className="eyebrow">{children}</span>;
 
 /* ============================================================ */
 
-const reservedPublicPaths = new Set(["auth", "dashboard", "onboarding", "admin"]);
+const reservedPublicPaths = new Set(["auth", "dashboard", "onboarding", "admin", "payment"]);
 
 function getPublicStoreSlugFromLocation() {
   if (typeof window === "undefined") return "";
 
   const slug = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, "").split("/")[0] || "");
   return slug && !reservedPublicPaths.has(slug.toLowerCase()) ? slug : "";
+}
+
+function isPaymentSuccessPath() {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.replace(/\/+$/g, "") === "/payment/success";
 }
 
 export default function App() {
@@ -383,6 +389,10 @@ export default function App() {
     { q: "How fast can I actually go live?", a: "Most businesses are live the same day they sign up." },
     { q: "Can I cancel if it\u2019s not for me?", a: "Yes \u2014 every plan is month-to-month. No lock-in." },
   ];
+
+  if (isPaymentSuccessPath()) {
+    return <PaymentSuccess />;
+  }
 
   const publicStoreSlug = getPublicStoreSlugFromLocation();
 
