@@ -94,6 +94,20 @@ export default function Storefront({ slug }) {
 
   const { toasts, notify, dismiss } = useToasts();
 
+  // If checkout redirects to Paystack via window.location and the buyer cancels
+  // and hits "back", browsers often restore this page from the bfcache instead
+  // of reloading it — freezing the button on "Redirecting..." forever since that
+  // state was set right before the navigation and never got a chance to reset.
+  useEffect(() => {
+    const handlePageShow = (event) => {
+      if (event.persisted) {
+        setSubmittingOrder(false);
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
   useEffect(() => {
     let active = true;
 
