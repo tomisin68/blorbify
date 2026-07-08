@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requireRelaySecret } from '../middleware/relayAuth.js';
 import { createHttpError } from '../utils/httpError.js';
 import { ok } from '../utils/response.js';
 import {
@@ -78,6 +79,32 @@ router.get('/paystack/verify/:reference', asyncHandler(async (req, res) => {
       verification: verificationData,
       result,
       order: await getSellerOrderByReference(reference),
+    },
+  });
+}));
+
+// Called by Blorbmart's webhook when it receives a live-mode Paystack event
+// tagged metadata.app === 'blorbify' with purpose 'seller_order_payment' —
+// Blorbmart owns the only registered live webhook, so it relays here.
+router.post('/paystack/relay', requireRelaySecret, asyncHandler(async (req, res) => {
+  const reference = req.body?.reference;
+
+  if (!reference) {
+    throw createHttpError(400, 'reference is required.');
+  }
+
+  const verificationResponse = await verifyPaystackTransaction(reference);
+  const verificationData = verificationResponse.data || {};
+  const result = await applySellerOrderPayment({
+    reference,
+    verificationData,
+    source: 'webhook-relay',
+  });
+
+  return ok(res, {
+    data: {
+      verification: verificationData,
+      result,
     },
   });
 }));
