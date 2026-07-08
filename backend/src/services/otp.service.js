@@ -11,15 +11,8 @@ function hashCode(code) {
   return crypto.createHash('sha256').update(code).digest('hex');
 }
 
-// TEMPORARY: OTP email delivery is broken in production (see generateAndSendOtp
-// below), so the code is pinned to a fixed value instead of a random one, and
-// sending is best-effort. This means ANYONE can verify ANY email address on
-// this deployment by typing 123456 — it must be reverted to crypto.randomInt
-// once real email delivery (Resend/SMTP) is fixed and confirmed working.
-const DEV_FIXED_OTP = '123456';
-
 function generateCode() {
-  return DEV_FIXED_OTP;
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
 }
 
 export async function generateAndSendOtp({ uid, email, name }) {
@@ -48,12 +41,12 @@ export async function generateAndSendOtp({ uid, email, name }) {
     createdAt: existing.exists ? existing.data().createdAt : fieldValue.serverTimestamp(),
   });
 
-  // Best-effort: the code above is already fixed/known, so a delivery failure
-  // shouldn't block verification — log it and move on instead of failing the request.
   try {
     await sendOtpEmail({ toEmail: email, name, code, minutes: OTP_TTL_MINUTES });
   } catch (error) {
-    console.error('OTP email send failed (continuing — code is fixed for now):', error.message);
+    console.error('OTP email send failed:', error.message);
+    await docRef.delete();
+    throw createHttpError(502, 'We could not send the verification email. Please try again in a moment.');
   }
 
   return { expiresInSeconds: OTP_TTL_MINUTES * 60, resendCooldownSeconds: RESEND_COOLDOWN_SECONDS };
@@ -115,12 +108,12 @@ export async function generateAndSendEmailChangeOtp({ uid, newEmail, name }) {
     createdAt: existing.exists ? existing.data().createdAt : fieldValue.serverTimestamp(),
   });
 
-  // Best-effort, same as generateAndSendOtp: the code is already fixed/known
-  // (see DEV_FIXED_OTP above), so a delivery failure shouldn't block verification.
   try {
     await sendEmailChangeOtpEmail({ toEmail: newEmail, name, code, minutes: OTP_TTL_MINUTES });
   } catch (error) {
-    console.error('Email-change OTP send failed (continuing — code is fixed for now):', error.message);
+    console.error('Email-change OTP send failed:', error.message);
+    await docRef.delete();
+    throw createHttpError(502, 'We could not send the verification email. Please try again in a moment.');
   }
 
   return { expiresInSeconds: OTP_TTL_MINUTES * 60, resendCooldownSeconds: RESEND_COOLDOWN_SECONDS };
