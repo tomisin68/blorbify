@@ -4,6 +4,7 @@ import { createHttpError } from '../utils/httpError.js';
 import { initializePaystackTransaction } from '../config/paystack.js';
 import { getSellerPayoutProfile } from './sellerPayout.service.js';
 import { sendSellerOrderReceiptEmail } from './receipt.service.js';
+import { deliverDigitalItems, resolveDigitalDeliveryItems } from './digitalDelivery.service.js';
 
 const SELLER_ORDERS_COLLECTION = 'sellerOrders';
 const SELLER_LEDGER_COLLECTION = 'sellerLedgers';
@@ -350,19 +351,43 @@ export async function applySellerOrderPayment({ reference, verificationData, sou
     };
   });
 
+  const orderIdForDelivery = result.order?.orderId || result.order?.metadata?.orderId;
+
+  // Awaited (unlike the fire-and-forget block below) because the client-side
+  // verify response is what the storefront's checkout-success screen reads to
+  // show download links immediately — this is just two fast doc reads, no
+  // email wait, so it doesn't meaningfully slow down the webhook/verify response.
+  if (result.matched && orderIdForDelivery) {
+    try {
+      const orderSnap = await adminDb.collection('orders').doc(orderIdForDelivery).get();
+      result.digitalDelivery = orderSnap.exists
+        ? await resolveDigitalDeliveryItems({ order: orderSnap.data() })
+        : [];
+    } catch (error) {
+      console.error('Digital delivery resolution failed:', error.message);
+      result.digitalDelivery = [];
+    }
+  }
+
   // Fire-and-forget, outside the transaction, and only on the one caller that
   // actually flipped this order to paid — `matched && !alreadyProcessed` is the
   // same flag the transaction above already uses to guard against the three
   // call sites (webhook, callback, client verify) double-processing.
   if (result.matched && !result.alreadyProcessed) {
     sendSellerOrderReceiptEmail({
-      orderId: result.order.orderId || result.order.metadata?.orderId,
+      orderId: orderIdForDelivery,
       sellerId: result.order.sellerId,
       paymentMethod: 'paystack',
       paymentReference: reference,
     }).catch((error) => {
       console.error('Seller order receipt email failed:', error.message);
     });
+
+    if (orderIdForDelivery) {
+      deliverDigitalItems({ orderId: orderIdForDelivery }).catch((error) => {
+        console.error('Digital delivery failed:', error.message);
+      });
+    }
   }
 
   return result;

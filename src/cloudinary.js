@@ -122,3 +122,75 @@ export function validateStoreBanner(file) {
 export function uploadStoreBanner(file, folder = 'blorbify/banners', onProgress) {
   return uploadImage(file, folder, onProgress, 'Store banner');
 }
+
+// Cloudinary's default unsigned-upload cap. If the account's plan allows
+// larger unsigned uploads this can be raised, but the preset itself would
+// reject anything over its own configured limit regardless of this check.
+const MAX_DIGITAL_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_DIGITAL_FILE_EXTENSIONS = ['pdf', 'zip', 'epub', 'mp3', 'mp4', 'docx'];
+
+export function validateDigitalFile(file) {
+  if (!file) {
+    return 'Please choose a file to sell.';
+  }
+
+  if (file.size > MAX_DIGITAL_FILE_SIZE) {
+    return `File must be ${Math.round(MAX_DIGITAL_FILE_SIZE / (1024 * 1024))}MB or smaller.`;
+  }
+
+  const extension = file.name.split('.').pop()?.toLowerCase() || '';
+  if (!ALLOWED_DIGITAL_FILE_EXTENSIONS.includes(extension)) {
+    return `File must be one of: ${ALLOWED_DIGITAL_FILE_EXTENSIONS.join(', ')}.`;
+  }
+
+  return '';
+}
+
+// Cloudinary's `raw` resource type handles any non-image, non-video file
+// (PDF, zip, epub…) — the `image/upload` endpoint used elsewhere rejects these.
+export function uploadDigitalFile(file, folder = 'blorbify/digital-files', onProgress) {
+  const validationError = validateDigitalFile(file);
+  if (validationError) {
+    return Promise.reject(new Error(validationError));
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  formData.append('folder', folder);
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/raw/upload`);
+
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && typeof onProgress === 'function') {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+
+    request.onload = () => {
+      const result = JSON.parse(request.responseText || 'null');
+
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(result?.error?.message || 'File upload failed. Please try again.'));
+        return;
+      }
+
+      if (typeof onProgress === 'function') {
+        onProgress(100);
+      }
+
+      resolve({
+        secureUrl: result.secure_url,
+        publicId: result.public_id,
+        format: result.format || '',
+        bytes: result.bytes,
+        originalName: file.name,
+      });
+    };
+
+    request.onerror = () => reject(new Error('File upload failed. Please check your connection and try again.'));
+    request.send(formData);
+  });
+}

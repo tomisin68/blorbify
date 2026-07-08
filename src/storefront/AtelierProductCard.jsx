@@ -1,8 +1,9 @@
 import { StoreIcon } from './icons';
+import { isProductAvailable } from './storefrontUtils';
 
 export default function AtelierProductCard({ product, categoryLabel, isWished, addLabel, formatCurrency, onSelect, onAddToCart, onToggleWish }) {
   const stock = Number(product.stock || 0);
-  const outOfStock = stock <= 0;
+  const outOfStock = !isProductAvailable(product);
   const lowStock = stock > 0 && stock <= 5;
 
   return (

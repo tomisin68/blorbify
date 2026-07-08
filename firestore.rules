@@ -67,6 +67,14 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    // Logistics companies are managed only by the backend's Admin SDK (see
+    // backend/src/routes/admin.routes.js), which bypasses these rules —
+    // sellers just need read access to browse partners and share orders with them.
+    match /logisticsCompanies/{companyId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /orders/{orderId} {
       allow read: if isSignedIn() && resource.data.storeId == request.auth.uid;
       allow create: if request.resource.data.keys().hasAll([
@@ -76,9 +84,15 @@ service cloud.firestore {
           'total',
           'customerName',
           'customerPhone',
-          'customerAddress',
           'status'
         ])
+        // Physical orders still need a real delivery address; digital-only
+        // carts (see `requiresAddress`, written by the storefront checkout)
+        // don't, since there's nothing to ship.
+        && (
+          request.resource.data.requiresAddress != true
+          || (request.resource.data.customerAddress is string && request.resource.data.customerAddress.size() > 0)
+        )
         && request.resource.data.status == 'pending'
         && exists(/databases/$(database)/documents/publicStores/$(request.resource.data.storeSlug))
         && get(/databases/$(database)/documents/publicStores/$(request.resource.data.storeSlug)).data.published == true

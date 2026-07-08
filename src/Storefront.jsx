@@ -45,8 +45,13 @@ function buildOrderItems(cart) {
     price: Number(item.price || 0),
     quantity: item.quantity,
     imageUrl: item.imageUrl || '',
+    type: item.type || 'physical',
     subtotal: Number(item.price || 0) * item.quantity,
   }));
+}
+
+function cartRequiresAddress(cart) {
+  return cart.some((item) => item.type !== 'digital');
 }
 
 // Puts the first item's product link on its own line so WhatsApp unfurls it into an
@@ -84,6 +89,7 @@ export default function Storefront({ slug }) {
   const [couponCode, setCouponCode] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
+  const [digitalDelivery, setDigitalDelivery] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [newsletterEmail, setNewsletterEmail] = useState('');
@@ -244,6 +250,7 @@ export default function Storefront({ slug }) {
         if (!active) return;
         const status = String(response?.data?.verification?.status || '').toLowerCase();
         if (['success', 'paid', 'completed'].includes(status)) {
+          setDigitalDelivery(response?.data?.result?.digitalDelivery || null);
           clearCart();
           clearSnapshot();
           setOrderPlaced(true);
@@ -270,7 +277,8 @@ export default function Storefront({ slug }) {
   }, [loading, searchParams, setSearchParams, clearCart, clearSnapshot, notify]);
 
   const deliveryFee = Number(store?.deliveryFee || 0);
-  const cartTotal = cartSubtotal + (cart.length ? deliveryFee : 0);
+  const requiresAddress = cartRequiresAddress(cart);
+  const cartTotal = cartSubtotal + (requiresAddress ? deliveryFee : 0);
   const freeShippingThreshold = Number(store?.freeShippingThreshold || 75000);
 
   const heroHeadline = copy.heroHeadline || store?.businessName || 'Your store';
@@ -329,9 +337,15 @@ export default function Storefront({ slug }) {
     const email = customer.email.trim();
     const phone = customer.phone.trim();
     const address = customer.address.trim();
+    const needsAddress = cartRequiresAddress(cart);
 
-    if (!name || !email || !phone || !address) {
-      notify('We need your name, email, phone number, and delivery address to arrange delivery', { type: 'error' });
+    if (!name || !email || !phone || (needsAddress && !address)) {
+      notify(
+        needsAddress
+          ? 'We need your name, email, phone number, and delivery address to arrange delivery'
+          : 'We need your name, email, and phone number to complete your order',
+        { type: 'error' }
+      );
       return;
     }
 
@@ -352,9 +366,10 @@ export default function Storefront({ slug }) {
         customerNote: customer.note.trim(),
         items: orderItems,
         subtotal: cartSubtotal,
-        deliveryFee,
+        deliveryFee: needsAddress ? deliveryFee : 0,
         total: cartTotal,
         status: 'pending',
+        requiresAddress: needsAddress,
         referralCode: getStoredReferral(store.storeSlug || slug) || '',
         createdAt: serverTimestamp(),
       });
@@ -437,9 +452,10 @@ export default function Storefront({ slug }) {
       customerNote: customer.note.trim(),
       items: orderItems,
       subtotal: cartSubtotal,
-      deliveryFee,
+      deliveryFee: cartRequiresAddress(cart) ? deliveryFee : 0,
       total: cartTotal,
       status: 'pending',
+      requiresAddress: cartRequiresAddress(cart),
       paymentMethod: 'whatsapp',
       referralCode: getStoredReferral(store.storeSlug || slug) || '',
       createdAt: serverTimestamp(),
@@ -461,6 +477,7 @@ export default function Storefront({ slug }) {
   const closeCart = () => {
     setCartOpen(false);
     setOrderPlaced(false);
+    setDigitalDelivery(null);
   };
 
   if (loading) {
@@ -546,6 +563,7 @@ export default function Storefront({ slug }) {
     handleCheckout,
     submittingOrder,
     orderPlaced,
+    digitalDelivery,
     whatsappEnabled,
     handleWhatsAppCheckout,
     newsletterEmail,

@@ -3,6 +3,7 @@ import { addDoc, collection, getDocs, query, serverTimestamp, where } from 'fire
 import { db } from '../firebase';
 import { StoreIcon } from './icons';
 import { getProductImages } from '../productImages';
+import { isProductAvailable } from './storefrontUtils';
 import StarRating from './StarRating';
 
 const emptyReviewForm = { rating: 0, customerName: '', comment: '' };
@@ -80,8 +81,10 @@ export default function ProductDetail({ product, categoryLabel, deliveryFee, isW
 
   const images = getProductImages(product);
   const activeImage = images[activeIndex] || images[0];
+  const isDigital = product.type === 'digital';
   const stock = Number(product.stock || 0);
-  const outOfStock = stock <= 0;
+  const outOfStock = !isProductAvailable(product);
+  const maxQuantity = isDigital ? Infinity : stock;
 
   const handleCopyLink = async () => {
     if (!shareUrl) return;
@@ -191,11 +194,11 @@ export default function ProductDetail({ product, categoryLabel, deliveryFee, isW
           <div className="pdetail-meta">
             <div>
               <span>Availability</span>
-              <b>{outOfStock ? 'Out of stock' : `${stock} in stock`}</b>
+              <b>{isDigital ? 'Instant download' : (outOfStock ? 'Out of stock' : `${stock} in stock`)}</b>
             </div>
             <div>
               <span>Delivery</span>
-              <b>{formatCurrency(deliveryFee)}</b>
+              <b>{isDigital ? 'Emailed to you' : formatCurrency(deliveryFee)}</b>
             </div>
           </div>
 
@@ -205,7 +208,7 @@ export default function ProductDetail({ product, categoryLabel, deliveryFee, isW
               <div className="qty-stepper">
                 <button type="button" onClick={() => setQuantity((q) => Math.max(1, q - 1))} aria-label="Decrease quantity"><StoreIcon name="minus" size={13} /></button>
                 <b>{quantity}</b>
-                <button type="button" onClick={() => setQuantity((q) => Math.min(stock, q + 1))} aria-label="Increase quantity"><StoreIcon name="plus" size={13} /></button>
+                <button type="button" onClick={() => setQuantity((q) => Math.min(maxQuantity, q + 1))} aria-label="Increase quantity"><StoreIcon name="plus" size={13} /></button>
               </div>
             </div>
           )}

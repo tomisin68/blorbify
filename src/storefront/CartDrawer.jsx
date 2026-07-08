@@ -17,6 +17,7 @@ export default function CartDrawer({
   onSubmit,
   submitting,
   orderPlaced,
+  digitalDelivery,
   onContinueShopping,
   checkoutLabel,
   formatCurrency,
@@ -28,6 +29,7 @@ export default function CartDrawer({
   const remainingForFreeDelivery = Math.max(0, freeShippingThreshold - cartSubtotal);
   const freeDeliveryProgress = Math.min(100, freeShippingThreshold ? (cartSubtotal / freeShippingThreshold) * 100 : 0);
   const freeDeliveryUnlocked = cartSubtotal >= freeShippingThreshold;
+  const requiresAddress = cart.some((item) => item.type !== 'digital');
 
   return (
     <div className={`cart-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
@@ -43,6 +45,16 @@ export default function CartDrawer({
             <span className="cart-success-badge"><StoreIcon name="sparkles" size={26} /></span>
             <h4>Order placed!</h4>
             <p>Thank you — the seller has your order and will reach out shortly to confirm delivery.</p>
+            {digitalDelivery?.length > 0 && (
+              <div className="cart-digital-delivery">
+                <p>Your download{digitalDelivery.length > 1 ? 's are' : ' is'} ready — also emailed to you:</p>
+                {digitalDelivery.map((item) => (
+                  <a key={item.productId || item.fileUrl} href={item.fileUrl} target="_blank" rel="noopener noreferrer" className="store-cta block">
+                    <StoreIcon name="bag" size={14} /> Download {item.name}
+                  </a>
+                ))}
+              </div>
+            )}
             <button type="button" className="store-cta" onClick={onContinueShopping}>Keep shopping</button>
           </div>
         ) : (
@@ -92,7 +104,7 @@ export default function CartDrawer({
 
               <div className="cart-totals">
                 <div className="cart-total-row"><span>Subtotal</span><span>{formatCurrency(cartSubtotal)}</span></div>
-                <div className="cart-total-row"><span>Delivery</span><span>{cart.length ? formatCurrency(freeDeliveryUnlocked ? 0 : deliveryFee) : formatCurrency(0)}</span></div>
+                <div className="cart-total-row"><span>Delivery</span><span>{requiresAddress ? formatCurrency(freeDeliveryUnlocked ? 0 : deliveryFee) : formatCurrency(0)}</span></div>
                 <div className="cart-total-row grand"><span>Total</span><span>{formatCurrency(freeDeliveryUnlocked ? cartSubtotal : cartTotal)}</span></div>
               </div>
 
@@ -119,7 +131,7 @@ export default function CartDrawer({
                     <option key={state} value={state}>{state}</option>
                   ))}
                 </select>
-                <textarea value={customer.address} onChange={(event) => onCustomerChange('address', event.target.value)} placeholder="Delivery address" />
+                <textarea value={customer.address} onChange={(event) => onCustomerChange('address', event.target.value)} placeholder={requiresAddress ? 'Delivery address' : 'Delivery address (not needed for digital items)'} />
                 <textarea value={customer.note} onChange={(event) => onCustomerChange('note', event.target.value)} placeholder="Note for the seller (optional)" />
                 <button type="submit" className="store-cta block" disabled={submitting || !cart.length}>
                   {submitting ? 'Redirecting to payment...' : checkoutLabel}

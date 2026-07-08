@@ -19,15 +19,18 @@ import {
 } from 'firebase/firestore';
 import {
   checkProductImageDimensions,
+  uploadDigitalFile,
   uploadProductImage,
   uploadStoreBanner,
   uploadStoreLogo,
+  validateDigitalFile,
   validateProductImage,
   validateStoreBanner,
   validateStoreLogo,
 } from './cloudinary';
 import { auth, db } from './firebase';
 import { createStoreSlug, getPublicStoreBaseUrl, getStoreUrl, validateStoreSlugFormat } from './storeLinks';
+import { getWhatsAppOrderHref } from './storefront/storefrontUtils';
 import { buildPublicStorePayload } from './publicStore';
 import { getProductImages, getProductCoverImage, MAX_PRODUCT_IMAGES } from './productImages';
 import SellerPayoutPanel from './SellerPayoutPanel';
@@ -280,33 +283,6 @@ const businessTypeOptions = [
   { value: 'others', label: 'Others' },
 ];
 
-const logisticsPartners = [
-  {
-    name: 'GIG Logistics',
-    coverage: 'Nationwide, same-day in major cities',
-    description: 'Pickup and delivery for parcels of any size, with real-time tracking for your customers.',
-    status: 'available',
-  },
-  {
-    name: 'Kwik Delivery',
-    coverage: 'Lagos, Abuja, Port Harcourt',
-    description: 'Fast dispatch riders for same-day, in-city orders — a good fit for perishable or urgent items.',
-    status: 'available',
-  },
-  {
-    name: 'Gokada Delivery',
-    coverage: 'Lagos',
-    description: 'On-demand motorcycle couriers for quick local drop-offs within Lagos.',
-    status: 'available',
-  },
-  {
-    name: 'DHL Nigeria',
-    coverage: 'Nationwide and international',
-    description: 'Reliable option for interstate and cross-border orders that need tracked, insured delivery.',
-    status: 'coming-soon',
-  },
-];
-
 const businessServiceGroups = [
   {
     category: 'Business Registration',
@@ -326,13 +302,13 @@ const businessServiceGroups = [
         name: 'Meta Ads',
         meta: 'Facebook & Instagram',
         description: 'Targeted ad campaigns that put your store in front of buyers already browsing on Facebook and Instagram.',
-        status: 'available',
+        status: 'coming-soon',
       },
       {
         name: 'Google Ads',
         meta: 'Search & Display',
         description: 'Show up when customers search for what you sell, and retarget visitors who checked out your store.',
-        status: 'available',
+        status: 'coming-soon',
       },
     ],
   },
@@ -425,7 +401,26 @@ function OrderRow({ order }) {
   );
 }
 
-function OrderDetailPage({ orderId }) {
+// Mirrors buildWhatsAppOrderMessage in Storefront.jsx (the buyer-facing checkout
+// handoff) but summarizes pickup/delivery details for a courier instead of a product order.
+function buildLogisticsHandoffMessage(order) {
+  const items = Array.isArray(order.items) ? order.items : [];
+  const lines = [
+    `Hi, we'd like to book a delivery for order #${(order.id || '').slice(0, 8)}:`,
+    '',
+    ...items.map((item) => `• ${item.quantity || 1} x ${item.name || 'Item'}`),
+    '',
+    `Total: ${formatCurrency(order.total ?? order.amount)}`,
+    `Recipient: ${order.customerName || 'Customer'}`,
+  ];
+  if (order.customerPhone) lines.push(`Phone: ${order.customerPhone}`);
+  if (order.customerAddress) lines.push(`Delivery address: ${order.customerAddress}`);
+  if (order.customerLocation) lines.push(`Location: ${order.customerLocation}`);
+  if (order.customerNote) lines.push(`Note: ${order.customerNote}`);
+  return lines.join('\n');
+}
+
+function OrderDetailPage({ orderId, logisticsCompanies = [] }) {
   const navigate = useNavigate();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -497,6 +492,8 @@ function OrderDetailPage({ orderId }) {
   }
 
   const items = Array.isArray(order.items) ? order.items : [];
+  const hasPhysicalItems = items.length === 0 || items.some((item) => item.type !== 'digital');
+  const hasDigitalItems = items.some((item) => item.type === 'digital');
   const placedAt = formatOrderTimestamp(order.createdAt);
   const currentStatus = order.status || 'pending';
   const isCancelled = currentStatus === 'cancelled';
@@ -648,6 +645,59 @@ function OrderDetailPage({ orderId }) {
         {order.customerAddress && <div><span>Delivery address</span><strong>{order.customerAddress}</strong></div>}
         {order.customerNote && <div><span>Note</span><strong>{order.customerNote}</strong></div>}
       </div>
+
+      {hasDigitalItems && (
+        <div className="order-logistics-share">
+          <h4>Digital delivery</h4>
+          {order.digitalDelivery?.items?.length ? (
+            <>
+              <p className="order-details-empty">
+                Delivered {formatOrderTimestamp(order.digitalDelivery.deliveredAt) || 'just now'}.
+              </p>
+              <div className="order-logistics-list">
+                {order.digitalDelivery.items.map((item) => (
+                  <a key={item.productId} className="btn-link" href={item.fileUrl} target="_blank" rel="noopener noreferrer">
+                    Download {item.name} →
+                  </a>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="order-details-empty">
+              The buyer's download link will appear here once payment is confirmed.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!isCancelled && hasPhysicalItems && (
+        <div className="order-logistics-share">
+          <h4>Share with a logistics partner</h4>
+          {logisticsCompanies.length === 0 ? (
+            <p className="order-details-empty">
+              No logistics partners available yet — add one from the Logistics tab.
+            </p>
+          ) : (
+            <div className="order-logistics-list">
+              {logisticsCompanies.map((company) => {
+                const href = getWhatsAppOrderHref(company.whatsapp, buildLogisticsHandoffMessage(order));
+                if (!href) return null;
+                return (
+                  <a
+                    key={company.id}
+                    className="btn-link"
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Share via WhatsApp with {company.name} →
+                  </a>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -669,6 +719,7 @@ const emptyProductForm = {
   description: '',
   category: '',
   stock: '',
+  type: 'physical',
 };
 
 const LOW_STOCK_THRESHOLD = 3;
@@ -730,6 +781,7 @@ async function renameStorePublicDoc({ userId, storeInfo, oldSlug, newSlug }) {
 function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
   const [form, setForm] = useState(emptyProductForm);
   const [imageItems, setImageItems] = useState([]);
+  const [digitalFileItem, setDigitalFileItem] = useState(null);
   const [saving, setSaving] = useState(false);
   const [editingKey, setEditingKey] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -793,6 +845,28 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
     }
   };
 
+  const handleDigitalFileChange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const fileError = validateDigitalFile(file);
+    if (fileError) {
+      setError(fileError);
+      return;
+    }
+
+    setDigitalFileItem({ kind: 'new', file, name: file.name });
+    setError('');
+    setSuccess('');
+  };
+
+  const removeDigitalFileItem = () => {
+    setDigitalFileItem(null);
+    setError('');
+    setSuccess('');
+  };
+
   const removeImageItem = (uid) => {
     setImageItems((current) => {
       const target = current.find((item) => item.uid === uid);
@@ -809,6 +883,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
     });
     setForm(emptyProductForm);
     setImageItems([]);
+    setDigitalFileItem(null);
     setEditingKey('');
     setUploadProgress(0);
     setWarning('');
@@ -840,6 +915,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
 
     const name = form.name.trim();
     const price = Number(String(form.price).replace(/[^\d.]/g, ''));
+    const isDigital = form.type === 'digital';
     const stock = form.stock === '' ? 0 : Number(String(form.stock).replace(/[^\d]/g, ''));
 
     if (!name) {
@@ -852,13 +928,18 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
       return;
     }
 
-    if (!Number.isFinite(stock) || stock < 0) {
+    if (!isDigital && (!Number.isFinite(stock) || stock < 0)) {
       setError('Enter a valid stock quantity.');
       return;
     }
 
     if (!imageItems.length) {
       setError('Add at least one product photo.');
+      return;
+    }
+
+    if (isDigital && !digitalFileItem) {
+      setError('Add the file customers will receive after buying this product.');
       return;
     }
 
@@ -902,6 +983,30 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
         });
       }
 
+      let digitalFile = null;
+      if (isDigital) {
+        if (digitalFileItem.kind === 'existing') {
+          digitalFile = {
+            url: digitalFileItem.url,
+            publicId: digitalFileItem.publicId || '',
+            format: digitalFileItem.format || '',
+            bytes: digitalFileItem.bytes || null,
+            originalName: digitalFileItem.originalName || '',
+          };
+        } else {
+          const uploaded = await uploadDigitalFile(digitalFileItem.file, `blorbify/digital-files/${userId}`, (fileProgress) => {
+            setUploadProgress(fileProgress);
+          });
+          digitalFile = {
+            url: uploaded.secureUrl,
+            publicId: uploaded.publicId,
+            format: uploaded.format,
+            bytes: uploaded.bytes,
+            originalName: uploaded.originalName,
+          };
+        }
+      }
+
       const cover = images[0];
       const now = new Date().toISOString();
       const product = {
@@ -911,7 +1016,9 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
         price,
         description: form.description.trim(),
         category: form.category.trim(),
-        stock,
+        type: isDigital ? 'digital' : 'physical',
+        stock: isDigital ? null : stock,
+        digitalFile: isDigital ? digitalFile : null,
         images,
         imageUrl: cover?.url || '',
         imagePublicId: cover?.publicId || '',
@@ -934,7 +1041,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
       // while it stays low — a new product's "previous" stock counts as
       // unlimited so it can still alert the first time it's saved low.
       const previousStock = Number(currentProduct?.stock ?? Infinity);
-      if (stock <= LOW_STOCK_THRESHOLD && previousStock > LOW_STOCK_THRESHOLD) {
+      if (!isDigital && stock <= LOW_STOCK_THRESHOLD && previousStock > LOW_STOCK_THRESHOLD) {
         notifyLowStock({ productName: name, stock }).catch((notifyError) => {
           console.error('Low stock alert failed:', notifyError);
         });
@@ -961,6 +1068,9 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
       kind: 'existing',
       ...image,
     })));
+    setDigitalFileItem(product.type === 'digital' && product.digitalFile?.url
+      ? { kind: 'existing', ...product.digitalFile, name: product.digitalFile.originalName || 'Current file' }
+      : null);
     setUploadProgress(0);
     setError('');
     setSuccess('');
@@ -971,6 +1081,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
       description: product.description || '',
       category: product.category || '',
       stock: product.stock ?? '',
+      type: product.type === 'digital' ? 'digital' : 'physical',
     });
   };
 
@@ -1009,6 +1120,13 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
               <input value={form.name} onChange={(event) => updateField('name', event.target.value)} placeholder="Ankara maxi dress" />
             </label>
             <label className="field-group">
+              <span>Product type</span>
+              <select value={form.type} onChange={(event) => updateField('type', event.target.value)}>
+                <option value="physical">Physical — shipped to the customer</option>
+                <option value="digital">Digital — a file to download</option>
+              </select>
+            </label>
+            <label className="field-group">
               <span>Price (NGN)</span>
               <input inputMode="decimal" value={form.price} onChange={(event) => updateField('price', event.target.value)} placeholder="8500" />
             </label>
@@ -1016,10 +1134,12 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
               <span>Category</span>
               <input value={form.category} onChange={(event) => updateField('category', event.target.value)} placeholder="Fashion" />
             </label>
-            <label className="field-group">
-              <span>Stock</span>
-              <input inputMode="numeric" value={form.stock} onChange={(event) => updateField('stock', event.target.value)} placeholder="12" />
-            </label>
+            {form.type !== 'digital' && (
+              <label className="field-group">
+                <span>Stock</span>
+                <input inputMode="numeric" value={form.stock} onChange={(event) => updateField('stock', event.target.value)} placeholder="12" />
+              </label>
+            )}
             <label className="field-group full">
               <span>Description</span>
               <textarea value={form.description} onChange={(event) => updateField('description', event.target.value)} placeholder="Short product details customers should know" rows="3" />
@@ -1047,10 +1167,29 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
           </div>
           <p className="image-help">The first photo is used as the cover image on your storefront. Add up to {MAX_PRODUCT_IMAGES} per product.</p>
 
-          {saving && imageItems.some((item) => item.kind === 'new') && (
+          {form.type === 'digital' && (
+            <>
+              <span className="control-label">File customers receive after buying</span>
+              {digitalFileItem ? (
+                <div className="edit-banner">
+                  <span>{digitalFileItem.name || digitalFileItem.originalName || 'File selected'}</span>
+                  <button type="button" onClick={removeDigitalFileItem} disabled={saving}>Remove</button>
+                </div>
+              ) : (
+                <label className="image-tile image-tile-add" style={{ width: '100%' }}>
+                  <IconImage size={22} />
+                  <span>Add file</span>
+                  <input type="file" accept=".pdf,.zip,.epub,.mp3,.mp4,.docx" onChange={handleDigitalFileChange} />
+                </label>
+              )}
+              <p className="image-help">Buyers get this file by email and on the checkout confirmation page right after payment.</p>
+            </>
+          )}
+
+          {saving && (imageItems.some((item) => item.kind === 'new') || digitalFileItem?.kind === 'new') && (
             <div className="upload-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={uploadProgress}>
               <div>
-                <span>Uploading photos</span>
+                <span>Uploading...</span>
                 <strong>{uploadProgress}%</strong>
               </div>
               <progress value={uploadProgress} max="100" />
@@ -1091,7 +1230,7 @@ function ProductManager({ userId, storeInfo, products, onProductsSaved }) {
                     </div>
                     <div className="product-card-meta">
                       <b>{formatCurrency(product.price)}</b>
-                      <small>{Number(product.stock || 0)} in stock</small>
+                      <small>{product.type === 'digital' ? 'Digital download' : `${Number(product.stock || 0)} in stock`}</small>
                     </div>
                     <div className="product-actions">
                       <button type="button" className="edit-product" onClick={() => handleEdit(product, productKey)} disabled={saving || deletingId === productKey}>
@@ -2662,6 +2801,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ordersError, setOrdersError] = useState('');
   const [tourOpen, setTourOpen] = useState(false);
+  const [logisticsCompanies, setLogisticsCompanies] = useState([]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -2733,6 +2873,30 @@ export default function Dashboard({ user, userProfile, onLogout }) {
       unsubscribeOrders();
       unsubscribeAnalyticsOrders();
     };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      return undefined;
+    }
+
+    // No orderBy here — combining it with a where clause would need a composite
+    // Firestore index, so the (small) list is just sorted client-side instead.
+    const unsubscribe = onSnapshot(
+      collection(db, 'logisticsCompanies'),
+      (snapshot) => {
+        const companies = snapshot.docs
+          .map((companyDoc) => ({ id: companyDoc.id, ...companyDoc.data() }))
+          .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        setLogisticsCompanies(companies);
+      },
+      (error) => {
+        console.error('Logistics companies load failed:', error);
+        setLogisticsCompanies([]);
+      }
+    );
+
+    return unsubscribe;
   }, [user?.uid]);
 
   useEffect(() => {
@@ -3676,6 +3840,14 @@ export default function Dashboard({ user, userProfile, onLogout }) {
         .order-summary span,
         .order-contact span { color: var(--slate); }
         .order-contact strong { text-align: right; overflow-wrap: anywhere; }
+        .order-logistics-share {
+          display: grid;
+          gap: 8px;
+          border-top: 1px dashed var(--line);
+          padding-top: 10px;
+        }
+        .order-logistics-share h4 { margin: 0; font-size: 13.5px; color: var(--ink); }
+        .order-logistics-list { display: grid; gap: 6px; }
         .order-detail { display: grid; gap: 16px; }
         .order-detail-back {
           justify-self: start;
@@ -4478,25 +4650,30 @@ export default function Dashboard({ user, userProfile, onLogout }) {
               </div>
               <p className="partner-intro">
                 Connect your store with a delivery partner so orders get picked up and delivered without you chasing riders.
-                Availability depends on where your store ships from.
+                Availability depends on where your store ships from. Once a partner is available, open any order and
+                share it with them directly over WhatsApp.
               </p>
-              <div className="partner-grid">
-                {logisticsPartners.map((partner) => (
-                  <div className="partner-card" key={partner.name}>
-                    <div className="partner-card-head">
-                      <div className="partner-icon">
-                        <IconTruck size={20} />
+              {logisticsCompanies.length === 0 ? (
+                <p className="partner-intro">No logistics partners have been added yet — check back soon.</p>
+              ) : (
+                <div className="partner-grid">
+                  {logisticsCompanies.map((company) => (
+                    <div className="partner-card" key={company.id}>
+                      <div className="partner-card-head">
+                        <div className="partner-icon">
+                          <IconTruck size={20} />
+                        </div>
+                        <span className={`partner-status ${company.active ? 'available' : 'coming-soon'}`}>
+                          {company.active ? 'Available' : 'Coming soon'}
+                        </span>
                       </div>
-                      <span className={`partner-status ${partner.status}`}>
-                        {partner.status === 'available' ? 'Available' : 'Coming soon'}
-                      </span>
+                      <strong>{company.name}</strong>
+                      <span className="partner-meta">{company.coverage}</span>
+                      <p>{company.description}</p>
                     </div>
-                    <strong>{partner.name}</strong>
-                    <span className="partner-meta">{partner.coverage}</span>
-                    <p>{partner.description}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -4554,7 +4731,11 @@ export default function Dashboard({ user, userProfile, onLogout }) {
 
           {activeTab === 'orders' && orderId && (
             <div className="content-card full-span">
-              <OrderDetailPage key={orderId} orderId={orderId} />
+              <OrderDetailPage
+                key={orderId}
+                orderId={orderId}
+                logisticsCompanies={logisticsCompanies.filter((company) => company.active && company.whatsapp)}
+              />
             </div>
           )}
 

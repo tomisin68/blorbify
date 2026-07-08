@@ -15,7 +15,7 @@ export default function NovaTemplate(props) {
     formatCurrency, wishlist, isWished, toggleWishlist, addToCart, selectedProduct, setSelectedProduct, productShareUrl,
     cart, cartCount, cartSubtotal, cartTotal, deliveryFee, freeShippingThreshold, updateQuantity, removeItem,
     cartOpen, setCartOpen, closeCart, mobileMenuOpen, setMobileMenuOpen,
-    customer, updateCustomer, handleCheckout, submittingOrder, orderPlaced,
+    customer, updateCustomer, handleCheckout, submittingOrder, orderPlaced, digitalDelivery,
     whatsappEnabled, handleWhatsAppCheckout, couponCode, setCouponCode,
     newsletterEmail, setNewsletterEmail, handleNewsletterSubmit,
     toasts, dismiss,
@@ -322,6 +322,7 @@ export default function NovaTemplate(props) {
         onSubmit={handleCheckout}
         submitting={submittingOrder}
         orderPlaced={orderPlaced}
+        digitalDelivery={digitalDelivery}
         onContinueShopping={closeCart}
         checkoutLabel={copy.checkoutLabel}
         formatCurrency={formatCurrency}

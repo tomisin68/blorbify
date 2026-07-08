@@ -54,6 +54,9 @@ export const sharedStorefrontStyles = `
   .cart-success-badge { width: 60px; height: 60px; border-radius: 50%; background: var(--store-accent); color: var(--store-accent-text); display: grid; place-items: center; margin-bottom: 10px; }
   .cart-success h4 { color: inherit; margin: 0; font-family: var(--store-display); font-size: 22px; }
   .cart-success p { margin: 8px 0 20px; color: var(--store-muted); font-size: 14px; line-height: 1.55; }
+  .cart-digital-delivery { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 16px; }
+  .cart-digital-delivery p { margin: 0 0 4px; }
+  .cart-digital-delivery a { display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
 
   .pdetail-modal { position: fixed; inset: 0; z-index: 140; display: grid; place-items: center; padding: 24px; }
   .pdetail-overlay { position: absolute; inset: 0; background: rgba(10,14,16,.5); }

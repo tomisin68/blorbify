@@ -21,7 +21,7 @@ export default function BloomTemplate(props) {
     formatCurrency, wishlist, isWished, toggleWishlist, addToCart, selectedProduct, setSelectedProduct,
     cart, cartCount, cartSubtotal, cartTotal, deliveryFee, freeShippingThreshold, updateQuantity, removeItem,
     cartOpen, setCartOpen, closeCart, mobileMenuOpen, setMobileMenuOpen,
-    customer, updateCustomer, handleCheckout, submittingOrder, orderPlaced,
+    customer, updateCustomer, handleCheckout, submittingOrder, orderPlaced, digitalDelivery,
     whatsappEnabled, handleWhatsAppCheckout, couponCode, setCouponCode,
     newsletterEmail, setNewsletterEmail, handleNewsletterSubmit,
     toasts, dismiss,
@@ -321,6 +321,7 @@ export default function BloomTemplate(props) {
         onSubmit={handleCheckout}
         submitting={submittingOrder}
         orderPlaced={orderPlaced}
+        digitalDelivery={digitalDelivery}
         onContinueShopping={closeCart}
         checkoutLabel={copy.checkoutLabel}
         formatCurrency={formatCurrency}

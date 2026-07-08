@@ -54,6 +54,7 @@ export function useCart(slug, { onAdd, onRemove, onLimit } = {}) {
           price: Number(product.price || 0),
           imageUrl: product.imageUrl,
           category: product.category || '',
+          type: product.type || 'physical',
           stock,
           quantity: nextQuantity,
         },

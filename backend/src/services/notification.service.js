@@ -215,6 +215,41 @@ export async function sendOrderStatusEmail({ order, status, storeName }) {
   });
 }
 
+export async function sendDigitalDeliveryEmail({ toEmail, toName, storeName, items }) {
+  if (!toEmail || !items?.length) {
+    return { sent: false, skipped: true };
+  }
+
+  const resolvedStoreName = storeName || 'your seller';
+  const recipientName = toName || 'there';
+  const subject = `Your download${items.length > 1 ? 's' : ''} from ${resolvedStoreName}`;
+  const linksHtml = items.map((item) => `
+      <p style="margin:0 0 12px;">
+        <a href="${item.fileUrl}" style="color:#141B1E; font-weight:700;" target="_blank" rel="noopener noreferrer">Download ${escapeHtml(item.name)}</a>
+      </p>
+    `).join('');
+  const html = renderEmailLayout({
+    preheader: `Your purchase from ${resolvedStoreName} is ready to download.`,
+    heading: 'Your download is ready',
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Hi ${escapeHtml(recipientName)},</p>
+      <p style="margin:0 0 18px;">Thanks for your purchase from ${escapeHtml(resolvedStoreName)}. Here ${items.length > 1 ? 'are your files' : 'is your file'}:</p>
+      ${linksHtml}
+      <p style="margin:16px 0 0; color:#93A2A6; font-size:13px;">Keep this email — you can use these links to download again later.</p>
+    `,
+    footerNote: `Sent because you purchased a digital product on ${escapeHtml(resolvedStoreName)}.`,
+  });
+  const text = `${subject}\n\nHi ${recipientName},\n\nThanks for your purchase from ${resolvedStoreName}. Here are your download links:\n\n${items.map((item) => `${item.name}: ${item.fileUrl}`).join('\n')}`;
+
+  return sendEmail({
+    to: toEmail,
+    subject,
+    html,
+    text,
+    data: { type: 'digital-delivery' },
+  });
+}
+
 export async function sendLowStockEmail({ toEmail, storeName, productName, stock }) {
   if (!toEmail) {
     return { sent: false, skipped: true };

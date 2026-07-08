@@ -4,7 +4,15 @@ import { defaultStoreCopy, getStoreSocialLinks, getTemplateTheme } from './store
 export function buildPublicStorePayload(storeInfo, ownerId) {
   const storeSlug = createStoreSlug(storeInfo.storeSlug || storeInfo.businessName || 'your-store');
   const products = Array.isArray(storeInfo.products)
-    ? storeInfo.products.filter((product) => product?.name && product?.imageUrl)
+    ? storeInfo.products
+      .filter((product) => product?.name && product?.imageUrl)
+      // The real digital file URL must never land in this publicly-readable
+      // doc — buyers only get it after payment, via the backend delivery flow.
+      .map((product) => {
+        if (product.type !== 'digital') return product;
+        const { digitalFile, ...rest } = product;
+        return { ...rest, hasDigitalFile: Boolean(digitalFile?.url) };
+      })
     : [];
   const theme = getTemplateTheme(storeInfo.template || 'modern', storeInfo);
   const socials = getStoreSocialLinks(storeInfo);

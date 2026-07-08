@@ -3,6 +3,13 @@ export function formatCurrency(value) {
   return `NGN ${amount.toLocaleString()}`;
 }
 
+// Digital products have no stock count (unlimited copies) — only physical
+// products can actually run out.
+export function isProductAvailable(product) {
+  if (product?.type === 'digital') return true;
+  return Number(product?.stock || 0) > 0;
+}
+
 function normalizeWhatsAppDigits(value) {
   const digits = String(value || '').replace(/\D/g, '');
   if (!digits) return '';
