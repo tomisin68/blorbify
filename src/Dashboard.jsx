@@ -26,7 +26,7 @@ import {
   validateStoreBanner,
   validateStoreLogo,
 } from './cloudinary';
-import { db } from './firebase';
+import { auth, db } from './firebase';
 import { createStoreSlug, getPublicStoreBaseUrl, getStoreUrl, validateStoreSlugFormat } from './storeLinks';
 import { buildPublicStorePayload } from './publicStore';
 import { getProductImages, getProductCoverImage, MAX_PRODUCT_IMAGES } from './productImages';
@@ -47,7 +47,14 @@ import {
 import LivePreviewFrame from './storefront/LivePreviewFrame';
 import StarRating from './storefront/StarRating';
 import { nigerianStates } from './nigerianStates';
-import { notifyLowStock, notifyOrderStatusUpdate, notifySupportMessage, sendOrderReceipt } from './backendApi';
+import {
+  confirmEmailChange,
+  notifyLowStock,
+  notifyOrderStatusUpdate,
+  notifySupportMessage,
+  sendEmailChangeOtp,
+  sendOrderReceipt,
+} from './backendApi';
 import DashboardTour from './DashboardTour';
 
 const emptyStats = {
@@ -1333,6 +1340,273 @@ function CouponManager({ userId, coupons, onCouponsSaved }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PersonalInfoEditor({ userId, profile }) {
+  const getCurrentForm = () => ({
+    firstName: profile?.firstName || '',
+    lastName: profile?.lastName || '',
+  });
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(getCurrentForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const updateField = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setError('');
+    setSuccess('');
+  };
+
+  const startEditing = () => {
+    setForm(getCurrentForm());
+    setEditing(true);
+    setError('');
+    setSuccess('');
+  };
+
+  const cancel = () => {
+    setForm(getCurrentForm());
+    setEditing(false);
+    setError('');
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (!form.firstName.trim()) {
+      setError('First name is required.');
+      return;
+    }
+    if (!form.lastName.trim()) {
+      setError('Last name is required.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'users', userId), {
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setEditing(false);
+      setSuccess('Personal information updated.');
+    } catch (saveError) {
+      setError(saveError?.message || 'Personal information could not be saved. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="business-info-view">
+        <div className="detail-list">
+          <DetailRow label="First name" value={profile?.firstName} />
+          <DetailRow label="Last name" value={profile?.lastName} />
+        </div>
+        {success && <div className="form-alert success">{success}</div>}
+        <button type="button" className="secondary-action" onClick={startEditing}>
+          <IconEdit size={16} />
+          Edit personal info
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form className="business-info-form" onSubmit={handleSubmit}>
+      <div className="product-form-grid">
+        <label className="field-group">
+          <span>First name</span>
+          <input value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} placeholder="Chioma" maxLength="50" />
+        </label>
+        <label className="field-group">
+          <span>Last name</span>
+          <input value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} placeholder="Okafor" maxLength="50" />
+        </label>
+      </div>
+
+      {error && <div className="form-alert error">{error}</div>}
+
+      <div className="form-actions">
+        <button type="button" className="secondary-action" onClick={cancel} disabled={saving}>Cancel</button>
+        <button type="submit" className="product-submit" disabled={saving}>
+          {saving ? 'Saving...' : 'Save personal info'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AccountEmailEditor({ profile }) {
+  const [step, setStep] = useState('idle'); // idle | entering | verifying
+  const [newEmail, setNewEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  // `profile` is kept live by the Dashboard's own Firestore listener on the
+  // user doc, so once confirmEmailChange updates users/{uid}.email, this
+  // reflects the new address automatically — no local mirror/effect needed.
+  const currentEmail = profile?.email || '';
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setTimeout(() => setCooldown((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const startChange = () => {
+    setStep('entering');
+    setNewEmail('');
+    setCode('');
+    setError('');
+    setSuccess('');
+  };
+
+  const cancel = () => {
+    setStep('idle');
+    setNewEmail('');
+    setCode('');
+    setError('');
+  };
+
+  const requestCode = async (emailToVerify) => {
+    setSending(true);
+    setError('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const result = await sendEmailChangeOtp(emailToVerify, idToken);
+      setCooldown(result?.resendCooldownSeconds || 45);
+      return true;
+    } catch (err) {
+      setError(err?.message || 'Could not send a verification code. Please try again.');
+      return false;
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSendCode = async (event) => {
+    event.preventDefault();
+    setError('');
+    const trimmed = newEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (trimmed === currentEmail.toLowerCase()) {
+      setError('That is already your current email address.');
+      return;
+    }
+
+    setNewEmail(trimmed);
+    const sent = await requestCode(trimmed);
+    if (sent) setStep('verifying');
+  };
+
+  const handleResend = () => {
+    if (sending || cooldown > 0) return;
+    requestCode(newEmail);
+  };
+
+  const handleVerify = async (event) => {
+    event.preventDefault();
+    setError('');
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError('Enter the 6-digit code from your email.');
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const result = await confirmEmailChange(code.trim(), idToken);
+      await auth.currentUser.getIdToken(true);
+      const confirmedEmail = result?.email || newEmail;
+      setStep('idle');
+      setSuccess(`Your login email is now ${confirmedEmail}. Use it next time you sign in.`);
+    } catch (err) {
+      setError(err?.message || 'Incorrect code. Please try again.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <div className="account-email-editor">
+      {step === 'idle' && (
+        <div className="detail-list">
+          <DetailRow label="Login email" value={currentEmail} />
+          {success && <div className="form-alert success">{success}</div>}
+          <button type="button" className="secondary-action" onClick={startChange}>
+            <IconEdit size={16} />
+            Change email
+          </button>
+        </div>
+      )}
+
+      {step === 'entering' && (
+        <form className="business-info-form" onSubmit={handleSendCode}>
+          <div className="product-form-grid">
+            <label className="field-group full">
+              <span>New email address</span>
+              <input
+                type="email"
+                value={newEmail}
+                onChange={(event) => setNewEmail(event.target.value)}
+                placeholder="you@newdomain.com"
+              />
+            </label>
+          </div>
+          {error && <div className="form-alert error">{error}</div>}
+          <div className="form-actions">
+            <button type="button" className="secondary-action" onClick={cancel} disabled={sending}>Cancel</button>
+            <button type="submit" className="product-submit" disabled={sending || !newEmail.trim()}>
+              {sending ? 'Sending...' : 'Send verification code'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {step === 'verifying' && (
+        <form className="business-info-form" onSubmit={handleVerify}>
+          <p className="partner-intro">
+            Enter the 6-digit code we sent to <strong>{newEmail}</strong> to confirm this is your new login email.
+          </p>
+          <div className="product-form-grid">
+            <label className="field-group full">
+              <span>Verification code</span>
+              <input
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(event) => { setCode(event.target.value.replace(/\D/g, '').slice(0, 6)); setError(''); }}
+                placeholder="000000"
+              />
+            </label>
+          </div>
+          {error && <div className="form-alert error">{error}</div>}
+          <div className="form-actions">
+            <button type="button" className="secondary-action" onClick={cancel} disabled={verifying}>Cancel</button>
+            <button type="button" className="secondary-action" onClick={handleResend} disabled={sending || cooldown > 0}>
+              {sending ? 'Sending...' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+            </button>
+            <button type="submit" className="product-submit" disabled={verifying || code.length !== 6}>
+              {verifying ? 'Verifying...' : 'Verify & save'}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -4157,6 +4431,24 @@ export default function Dashboard({ user, userProfile, onLogout }) {
                 }}
                 onBusinessSaved={(nextStoreInfo) => setStore((current) => ({ ...(current || storeInfo), ...nextStoreInfo }))}
               />
+            </div>
+          )}
+
+          {(activeTab === 'overview' || activeTab === 'business') && (
+            <div className="content-card">
+              <div className="card-header">
+                <h3>Personal Information</h3>
+              </div>
+              <PersonalInfoEditor userId={user.uid} profile={profile} />
+            </div>
+          )}
+
+          {(activeTab === 'overview' || activeTab === 'business') && (
+            <div className="content-card">
+              <div className="card-header">
+                <h3>Account Email</h3>
+              </div>
+              <AccountEmailEditor profile={profile} />
             </div>
           )}
 

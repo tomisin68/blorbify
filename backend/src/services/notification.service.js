@@ -118,6 +118,25 @@ export async function sendOtpEmail({ toEmail, name, code, minutes }) {
   return sendEmail({ to: toEmail, subject, html, text, data: { type: 'otp' } });
 }
 
+export async function sendEmailChangeOtpEmail({ toEmail, name, code, minutes }) {
+  const recipientName = name || 'there';
+  const subject = 'Confirm your new Blorbify email address';
+  const html = renderEmailLayout({
+    preheader: `Your confirmation code is ${code}`,
+    heading: 'Confirm your new email address',
+    bodyHtml: `
+      <p style="margin:0 0 14px;">Hi ${escapeHtml(recipientName)},</p>
+      <p style="margin:0 0 18px;">Use the code below to confirm this is your new login email for Blorbify. It expires in ${minutes} minutes.</p>
+      ${renderEmailCodeBlock(code)}
+      <p style="margin:16px 0 0; color:#93A2A6; font-size:13px;">Didn&rsquo;t request this? You can safely ignore this email — your login email won&rsquo;t change.</p>
+    `,
+    footerNote: 'Sent because someone requested to change the login email on a Blorbify account to this address.',
+  });
+  const text = `Your Blorbify email-change confirmation code is ${code}. It expires in ${minutes} minutes.\n\nDidn't request this? You can ignore this email — your login email won't change.`;
+
+  return sendEmail({ to: toEmail, subject, html, text, data: { type: 'email-change-otp' } });
+}
+
 export async function sendSignupWelcomeEmail({ toEmail, name }) {
   const recipientName = name || 'there';
   const subject = 'Welcome to Blorbify — a note from our founder';

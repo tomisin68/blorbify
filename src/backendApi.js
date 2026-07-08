@@ -148,6 +148,14 @@ export async function verifyEmailOtp(code, token) {
   return backendRequest('/auth/otp/verify', { method: 'POST', token, body: { code } });
 }
 
+export async function sendEmailChangeOtp(newEmail, token) {
+  return backendRequest('/auth/email-change/send', { method: 'POST', token, body: { newEmail } });
+}
+
+export async function confirmEmailChange(code, token) {
+  return backendRequest('/auth/email-change/confirm', { method: 'POST', token, body: { code } });
+}
+
 export async function notifyOrderStatusUpdate({ orderId, status }, token) {
   return backendRequest('/notifications/order-status', {
     method: 'POST',
