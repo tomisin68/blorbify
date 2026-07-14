@@ -108,6 +108,13 @@ export function fetchAdminSellers() {
   return adminRequest<AdminSeller[]>('/admin/sellers')
 }
 
+export function markSellerPaid(sellerId: string, planId: string) {
+  return adminRequest<{ subscription: unknown; user: unknown }>(
+    `/admin/sellers/${encodeURIComponent(sellerId)}/mark-paid`,
+    { method: 'POST', body: { planId } }
+  )
+}
+
 export function fetchAdminOrders(limit = 100) {
   return adminRequest<AdminOrder[]>(`/admin/orders?limit=${limit}`)
 }

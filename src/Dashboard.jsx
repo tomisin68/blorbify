@@ -3044,6 +3044,79 @@ export default function Dashboard({ user, userProfile, onLogout }) {
     );
   }
 
+  const hasActivePlan = profile?.subscription?.status === 'active';
+
+  if (!hasActivePlan) {
+    return (
+      <div className="dashboard-gate">
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700;800;900&display=swap');
+          .dashboard-gate {
+            min-height: 100vh;
+            background: #f6f8f1;
+            color: #192328;
+            font-family: Raleway, system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 48px 20px 64px;
+          }
+          .dashboard-gate-topbar {
+            width: 100%;
+            max-width: 720px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+          }
+          .dashboard-gate-brand {
+            font-weight: 900;
+            font-size: 18px;
+          }
+          .dashboard-gate-logout {
+            border: 1px solid rgba(25,35,40,0.15);
+            background: transparent;
+            color: #192328;
+            border-radius: 999px;
+            padding: 8px 16px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+          }
+          .dashboard-gate-card {
+            width: 100%;
+            max-width: 720px;
+            display: grid;
+            gap: 10px;
+          }
+          .dashboard-gate-card h1 {
+            margin: 0;
+            font-size: 26px;
+          }
+          .dashboard-gate-card p {
+            margin: 0 0 14px;
+            color: #728084;
+            line-height: 1.55;
+          }
+        `}</style>
+        <div className="dashboard-gate-topbar">
+          <span className="dashboard-gate-brand">Blorbify</span>
+          <button type="button" className="dashboard-gate-logout" onClick={onLogout}>
+            Logout
+          </button>
+        </div>
+        <div className="dashboard-gate-card">
+          <h1>Choose a plan to launch your store</h1>
+          <p>
+            Your store details are saved, but you need an active plan before you can list products, take orders, or
+            use the rest of the dashboard.
+          </p>
+          <BillingPanel user={user} userProfile={profile} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard-root">
       <style>{`
@@ -4865,7 +4938,7 @@ export default function Dashboard({ user, userProfile, onLogout }) {
               <div className="card-header">
                 <h3>Billing</h3>
               </div>
-              <BillingPanel user={user} userProfile={userProfile} />
+              <BillingPanel user={user} userProfile={profile} />
             </div>
           )}
 

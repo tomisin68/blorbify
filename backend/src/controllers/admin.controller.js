@@ -7,6 +7,7 @@ import {
   listPlatformOrders,
   listSellersOverview,
 } from '../services/admin.service.js';
+import { applyManualActivation } from '../services/billing.service.js';
 import {
   getSupportMessages,
   listSupportConversations,
@@ -62,4 +63,16 @@ export const postSupportRead = asyncHandler(async (req, res) => {
   const { sellerId } = req.params;
   await markConversationReadByAdmin(sellerId);
   return ok(res, { data: { ok: true } });
+});
+
+export const postMarkSellerPaid = asyncHandler(async (req, res) => {
+  const { sellerId } = req.params;
+  const planId = String(req.body?.planId || '').trim();
+
+  if (!planId) {
+    throw createHttpError(400, 'planId is required.');
+  }
+
+  const data = await applyManualActivation({ userId: sellerId, planId, activatedByEmail: req.user?.email });
+  return ok(res, { data });
 });

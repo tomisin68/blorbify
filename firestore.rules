@@ -10,6 +10,15 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Products may only be listed once a seller has an active paid plan (set by
+    // the backend on successful Paystack payment, or by an admin override —
+    // see backend/src/services/billing.service.js applyManualActivation). Reads
+    // the seller's own users/{userId} doc, which every seller can already read.
+    function hasActiveSubscription(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.get('subscription', {}).get('status', '') == 'active';
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId);
@@ -20,7 +29,11 @@ service cloud.firestore {
     match /stores/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId);
-      allow update: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['products'])
+          || hasActiveSubscription(userId)
+        );
       allow delete: if isOwner(userId);
     }
 
@@ -31,10 +44,16 @@ service cloud.firestore {
       // out during rule evaluation, which Firestore treats as a denial rather
       // than "not found". Exposes no data, since there is none to expose.
       allow read: if resource == null || resource.data.published == true || isOwner(resource.data.ownerId);
-      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && (request.resource.data.products.size() == 0 || hasActiveSubscription(request.auth.uid));
       allow update: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
-        && (!resource.data.keys().hasAny(['ownerId']) || resource.data.ownerId == request.auth.uid);
+        && (!resource.data.keys().hasAny(['ownerId']) || resource.data.ownerId == request.auth.uid)
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['products'])
+          || hasActiveSubscription(request.auth.uid)
+        );
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 

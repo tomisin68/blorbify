@@ -11,6 +11,14 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -35,7 +43,7 @@ import {
 import { StatusBadge } from '@/components/status-badge'
 import { LoadingBlock, ErrorBlock } from '@/components/data-state'
 import { useAsyncData } from '@/hooks/use-async-data'
-import { fetchAdminSellers, type AdminSeller } from '@/lib/api'
+import { fetchAdminSellers, fetchSubscriptionPlans, markSellerPaid, type AdminSeller } from '@/lib/api'
 import { getStoreUrl } from '@/lib/config'
 import { formatNaira } from '@/lib/format'
 import { toast } from 'sonner'
@@ -51,8 +59,33 @@ const statusFilters: Array<{ label: string; value: SellerStatusFilter }> = [
 
 export function SellersPage() {
   const { data: sellers, loading, error, reload } = useAsyncData(fetchAdminSellers)
+  const { data: plansData } = useAsyncData(fetchSubscriptionPlans)
+  const plans = plansData?.plans ?? []
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<SellerStatusFilter>('all')
+  const [markPaidSeller, setMarkPaidSeller] = useState<AdminSeller | null>(null)
+  const [markPaidPlanId, setMarkPaidPlanId] = useState('')
+  const [markingPaid, setMarkingPaid] = useState(false)
+
+  const openMarkPaidDialog = (seller: AdminSeller) => {
+    setMarkPaidSeller(seller)
+    setMarkPaidPlanId(seller.plan || plans[0]?.id || '')
+  }
+
+  const confirmMarkPaid = async () => {
+    if (!markPaidSeller || !markPaidPlanId) return
+    setMarkingPaid(true)
+    try {
+      await markSellerPaid(markPaidSeller.id, markPaidPlanId)
+      toast.success(`${markPaidSeller.storeName} marked as paid.`)
+      setMarkPaidSeller(null)
+      reload()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not mark this seller as paid.')
+    } finally {
+      setMarkingPaid(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     return (sellers ?? []).filter((seller) => {
@@ -162,6 +195,9 @@ export function SellersPage() {
                               Visit store
                             </a>
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openMarkPaidDialog(seller)}>
+                            Mark as paid
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => toast.info(`Suspend flow for ${seller.storeName} — not wired up yet.`)}
                           >
@@ -184,6 +220,38 @@ export function SellersPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(markPaidSeller)} onOpenChange={(open) => !open && setMarkPaidSeller(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark {markPaidSeller?.storeName} as paid</DialogTitle>
+            <DialogDescription>
+              Manually activates a plan for this seller, bypassing Paystack checkout. Use this for billing issues or
+              comped accounts — it unlocks their dashboard immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <Select value={markPaidPlanId} onValueChange={setMarkPaidPlanId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Choose a plan" />
+            </SelectTrigger>
+            <SelectContent>
+              {plans.map((plan) => (
+                <SelectItem key={plan.id} value={plan.id}>
+                  {plan.name} — {formatNaira(plan.amountNaira)}/{plan.interval}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMarkPaidSeller(null)} disabled={markingPaid}>
+              Cancel
+            </Button>
+            <Button onClick={confirmMarkPaid} disabled={!markPaidPlanId || markingPaid}>
+              {markingPaid ? 'Activating…' : 'Mark as paid'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

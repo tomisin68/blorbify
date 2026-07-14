@@ -8,6 +8,7 @@ import {
   getSellers,
   getSupportConversations,
   getSupportMessagesForConversation,
+  postMarkSellerPaid,
   postSupportReply,
   postSupportRead,
 } from '../controllers/admin.controller.js';
@@ -24,6 +25,7 @@ router.use(requireAuth, requireAdminEmail);
 
 router.get('/overview', getOverview);
 router.get('/sellers', getSellers);
+router.post('/sellers/:sellerId/mark-paid', postMarkSellerPaid);
 router.get('/orders', getOrders);
 router.get('/notifications', getNotifications);
 router.get('/support/conversations', getSupportConversations);

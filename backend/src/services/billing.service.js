@@ -249,6 +249,66 @@ export async function applyVerifiedPayment({ reference, verificationData, source
   };
 }
 
+export async function applyManualActivation({ userId, planId, activatedByEmail }) {
+  const plan = getSubscriptionPlan(planId);
+
+  if (!plan) {
+    throw createHttpError(422, `Unknown plan "${planId}".`);
+  }
+
+  const reference = `admin-override-${Date.now()}`;
+  const activationDate = new Date();
+  const expiresAt = addDays(activationDate, planDurationDays(plan));
+
+  const subscriptionUpdate = {
+    userId,
+    planId: plan.id,
+    planName: plan.name,
+    amountNaira: plan.amountNaira,
+    amountKobo: plan.amountNaira * 100,
+    interval: plan.interval,
+    status: 'active',
+    paymentStatus: 'manual',
+    reference,
+    activatedBy: 'admin',
+    activatedByEmail: activatedByEmail || '',
+    startsAt: activationDate.toISOString(),
+    endsAt: expiresAt.toISOString(),
+    updatedAt: fieldValue.serverTimestamp(),
+  };
+
+  const userUpdate = {
+    subscription: {
+      planId: plan.id,
+      planName: plan.name,
+      status: 'active',
+      reference,
+      amountNaira: plan.amountNaira,
+      amountKobo: plan.amountNaira * 100,
+      startsAt: subscriptionUpdate.startsAt,
+      endsAt: subscriptionUpdate.endsAt,
+      activatedBy: 'admin',
+    },
+    billing: {
+      planId: plan.id,
+      planName: plan.name,
+      status: 'active',
+      reference,
+    },
+    updatedAt: fieldValue.serverTimestamp(),
+  };
+
+  const subscriptionRef = adminDb.collection('billingSubscriptions').doc(userId);
+  const userRef = adminDb.collection('users').doc(userId);
+
+  await Promise.all([
+    subscriptionRef.set(subscriptionUpdate, { merge: true }),
+    userRef.set(userUpdate, { merge: true }),
+  ]);
+
+  return { subscription: subscriptionUpdate, user: userUpdate };
+}
+
 export async function getSubscriptionByUserId(userId) {
   const snapshot = await adminDb.collection('billingSubscriptions').doc(userId).get();
   return snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
